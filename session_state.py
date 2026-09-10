@@ -69,6 +69,9 @@ class PronunciationSessionState:
     # Aligned phoneme details for interactive phoneme heatmap
     alignment: List[Dict[str, Any]] = field(default_factory=list)
 
+    # Active track words to advance through
+    active_track_words: List[str] = field(default_factory=list)
+
     def _new_drill_id(self) -> str:
         """Generate a new unique drill ID."""
         return str(uuid.uuid4())[:8]
@@ -106,18 +109,28 @@ class PronunciationSessionState:
         if len(self.session_history) > 5:
             self.session_history = self.session_history[-5:]
 
-    def advance_to_next_word(self, vocab_list: List[str]) -> str:
-        """Advance current target word to next word in the target vocabulary list."""
-        if not vocab_list:
+    def advance_to_next_word(self, vocab_list: Optional[List[str]] = None) -> str:
+        """
+        Advance current target word to next word in the active list.
+        If the current target word is custom or not in the list, keep it.
+        """
+        candidate_list = self.active_track_words if self.active_track_words else vocab_list
+        if not candidate_list:
             return self.current_target_word
 
-        try:
-            curr_idx = vocab_list.index(self.current_target_word.lower())
-            next_idx = (curr_idx + 1) % len(vocab_list)
-        except ValueError:
-            next_idx = 0
+        norm_vocab = [w.lower() for w in candidate_list]
+        curr = self.current_target_word.lower()
 
-        self.current_target_word = vocab_list[next_idx]
+        if curr in norm_vocab:
+            curr_idx = norm_vocab.index(curr)
+            next_idx = (curr_idx + 1) % len(norm_vocab)
+            self.current_target_word = candidate_list[next_idx]
+        else:
+            # Custom word or word not in active list: keep current target word!
+            pass
+
+        self.expected_phonemes = []
+        self.observed_phonemes = []
         self.weak_phoneme = None
         self.weak_phoneme_detail = None
         self.speed_tier = "normal"

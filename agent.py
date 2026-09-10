@@ -215,10 +215,15 @@ async def entrypoint(ctx: JobContext) -> None:
             msg = json.loads(text)
             if msg.get("type") == "select_word":
                 selected = msg.get("word", "").strip().lower()
+                track_words = msg.get("track_words", [])
                 if selected and has_pronunciation(selected):
                     logger.info(f"[CLIENT DATA] Selected target word: '{selected}'")
                     state.current_target_word = selected
                     state.expected_phonemes = get_expected_phonemes(selected)
+                    if track_words:
+                        state.active_track_words = [w.lower() for w in track_words]
+                    else:
+                        state.active_track_words = []
                     state.weak_phoneme = None
                     state.weak_phoneme_detail = None
                     state.diagnosis_confidence = 0.0
@@ -531,8 +536,21 @@ async def entrypoint(ctx: JobContext) -> None:
             _start_silence_watchdog()
             return
 
-        # Identify target word (Mode A or Mode B)
-        target = extract_target_word(user_text, TARGET_VOCABULARY)
+        # Identify target word (Explicit command Mode A or Initial Selection Mode B)
+        norm_text = user_text.lower().strip()
+        explicit_match = re.search(
+            r"(?:practice(?: the word)?|pronounce|word is|say|coach|switch to|let's try|let's do)\s+([a-zA-Z]+)",
+            norm_text,
+        )
+
+        target = None
+        if explicit_match:
+            # User explicitly requested a target word
+            target = explicit_match.group(1).lower()
+        elif not state.current_target_word or len(state.session_history) == 0:
+            # At start of session with no attempts yet, speech can select initial target
+            target = extract_target_word(user_text, state.active_track_words or TARGET_VOCABULARY)
+
         if target:
             # Safe dictionary check
             if not has_pronunciation(target):
@@ -550,6 +568,7 @@ async def entrypoint(ctx: JobContext) -> None:
                 _start_silence_watchdog()
                 return
             state.current_target_word = target
+            state.expected_phonemes = get_expected_phonemes(target)
 
         word_to_analyze = state.current_target_word or TARGET_VOCABULARY[0]
 
@@ -628,10 +647,14 @@ async def entrypoint(ctx: JobContext) -> None:
                 phoneme=None,
                 weak_detail="Clear",
             )
-            next_word = state.advance_to_next_word(TARGET_VOCABULARY)
+            vocab_to_use = state.active_track_words if state.active_track_words else TARGET_VOCABULARY
+            next_word = state.advance_to_next_word(vocab_to_use)
             await _broadcast_state()
 
-            praise_msg = f"Great job! Your pronunciation of '{word_to_analyze}' was clear. Next word is {next_word}."
+            if next_word != word_to_analyze:
+                praise_msg = f"Great job! Your pronunciation of '{word_to_analyze}' was clear. Next word is {next_word}."
+            else:
+                praise_msg = f"Great job! Your pronunciation of '{word_to_analyze}' was clear and spot on! Say {word_to_analyze} again, or choose another word to practice."
             tts._opts.speed_alpha = SPEED_TIERS.get("normal", 1.0)
             logger.info(f"[AGENT] {praise_msg}")
             sess_logger.mark_llm_first_token()

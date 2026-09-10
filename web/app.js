@@ -151,10 +151,20 @@ let isMicMuted = false;
 let lastCoachMsg = '';
 let currentTargetWord = 'three';
 let currentBreakdown = [];
-let activeTrackId = 'th-vs-t';
+let activeTrackId = 'all';
 
-// Pre-defined minimal pairs tracks (fast client-side lookup)
+// Pre-defined practice tracks (fast client-side lookup)
 const TRACKS_DATA = {
+    'all': [
+        { word: 'three', ipa: '/θɹi/' },
+        { word: 'ship', ipa: '/ʃɪp/' },
+        { word: 'sheep', ipa: '/ʃip/' },
+        { word: 'rice', ipa: '/ɹaɪs/' },
+        { word: 'light', ipa: '/laɪt/' },
+        { word: 'right', ipa: '/ɹaɪt/' },
+        { word: 'think', ipa: '/θɪŋk/' },
+        { word: 'this', ipa: '/ðɪs/' },
+    ],
     'th-vs-t': [
         { word: 'three', ipa: '/θɹi/' },
         { word: 'think', ipa: '/θɪŋk/' },
@@ -316,6 +326,9 @@ async function connect() {
         // Setup live audio visualizer
         setupMicVisualizer();
 
+        // Send active track words & initial target word to agent
+        notifyAgentOfWord(currentTargetWord, false);
+
     } catch (err) {
         console.error('Connection failed:', err);
         setStatus('disconnected', 'Disconnected');
@@ -373,10 +386,18 @@ muteBtn.addEventListener('click', async () => {
 // 4. Send Word Selection to LiveKit Agent
 // =============================================================================
 
-function notifyAgentOfWord(word) {
+function notifyAgentOfWord(word, custom = false) {
     if (room && room.state === ConnectionState.Connected && room.localParticipant) {
         try {
-            const payload = JSON.stringify({ type: 'select_word', word: word });
+            let trackWords = undefined;
+            if (!custom && TRACKS_DATA[activeTrackId]) {
+                trackWords = TRACKS_DATA[activeTrackId].map((item) => item.word);
+            }
+            const payload = JSON.stringify({
+                type: 'select_word',
+                word: word,
+                track_words: trackWords,
+            });
             room.localParticipant.publishData(new TextEncoder().encode(payload), { reliable: true });
         } catch (err) {
             console.debug('Failed to publish select_word to agent:', err);
@@ -388,7 +409,7 @@ function notifyAgentOfWord(word) {
 // 5. Target Word Selection & Phoneme Breakdown
 // =============================================================================
 
-async function selectTargetWord(word, notify = true) {
+async function selectTargetWord(word, notify = true, custom = false) {
     if (!word) return;
     const cleanWord = word.trim().toLowerCase().replace(/[^a-z]/g, '');
     if (!cleanWord) return;
@@ -430,7 +451,7 @@ async function selectTargetWord(word, notify = true) {
     }
 
     if (notify) {
-        notifyAgentOfWord(cleanWord);
+        notifyAgentOfWord(cleanWord, custom);
         appendTranscript('system', `Target word set to "${cleanWord}". Speak it when ready.`);
     }
 }
@@ -561,7 +582,7 @@ function updateArticulationGuide(guide, soundLabel) {
 
 function renderTrack(trackId) {
     activeTrackId = trackId;
-    const words = TRACKS_DATA[trackId] || TRACKS_DATA['th-vs-t'];
+    const words = TRACKS_DATA[trackId] || TRACKS_DATA['all'];
 
     trackTabs.forEach((tab) => {
         if (tab.getAttribute('data-track') === trackId) tab.classList.add('active');
@@ -577,7 +598,7 @@ function renderTrack(trackId) {
         btn.setAttribute('data-word', item.word);
         btn.textContent = `${item.word} (${item.ipa})`;
         btn.addEventListener('click', () => {
-            selectTargetWord(item.word);
+            selectTargetWord(item.word, true, false);
         });
         trackWordsContainer.appendChild(btn);
     });
@@ -599,7 +620,7 @@ if (customWordForm) {
         e.preventDefault();
         const val = customWordInput ? customWordInput.value.trim() : '';
         if (val) {
-            selectTargetWord(val);
+            selectTargetWord(val, true, true);
             if (customWordInput) customWordInput.blur();
         }
     });
@@ -610,7 +631,7 @@ suggChips.forEach((chip) => {
         const word = chip.getAttribute('data-word');
         if (word) {
             if (customWordInput) customWordInput.value = word;
-            selectTargetWord(word);
+            selectTargetWord(word, true, true);
         }
     });
 });
@@ -805,8 +826,8 @@ function appendTranscript(type, text) {
 
 window.addEventListener('DOMContentLoaded', () => {
     initWaveField();
-    renderTrack('th-vs-t');
-    selectTargetWord('three', false);
+    renderTrack('all');
+    selectTargetWord('three', false, false);
 
     if (window.location.search.includes('coach=') || window.location.hash === '#coach') {
         setTimeout(connect, 400);

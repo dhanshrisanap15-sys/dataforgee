@@ -94,6 +94,23 @@ class TestCustomWordAndArticulation(unittest.TestCase):
         self.assertEqual(extract_target_word("say three", vocab), "three")
         self.assertEqual(extract_target_word("I want to practice three today", vocab), "three")
 
+    def test_advance_to_next_word_track_and_custom(self):
+        # 1. Custom word stays as target word
+        state = PronunciationSessionState(current_target_word="squirrel", active_track_words=[])
+        next_w = state.advance_to_next_word(["three", "think", "this"])
+        self.assertEqual(next_w, "squirrel")
+        self.assertEqual(state.current_target_word, "squirrel")
+
+        # 2. Track advancement
+        track = ["three", "think", "that"]
+        state_track = PronunciationSessionState(current_target_word="three", active_track_words=track)
+        next_1 = state_track.advance_to_next_word()
+        self.assertEqual(next_1, "think")
+        next_2 = state_track.advance_to_next_word()
+        self.assertEqual(next_2, "that")
+        next_3 = state_track.advance_to_next_word()
+        self.assertEqual(next_3, "three")
+
 
 class TestTokenServerEndpoints(unittest.TestCase):
     def test_api_phonemes_and_tracks(self):
