@@ -96,7 +96,7 @@ function initWaveField() {
 }
 
 // =============================================================================
-// 2. DOM References & State
+// 2. DOM References & Global State
 // =============================================================================
 
 const connectBtn = document.getElementById('connect-btn');
@@ -122,7 +122,25 @@ const micCtx = micMeterCanvas ? micMeterCanvas.getContext('2d') : null;
 const micStatusLabel = document.getElementById('mic-status-label');
 const historyStrip = document.getElementById('history-strip');
 const transcriptLog = document.getElementById('transcript-log');
-const vocabPills = document.querySelectorAll('.vocab-pill');
+
+// Custom Word Bar elements
+const customWordForm = document.getElementById('custom-word-form');
+const customWordInput = document.getElementById('custom-word-input');
+const customWordSubmit = document.getElementById('custom-word-submit');
+const suggChips = document.querySelectorAll('.sugg-chip');
+
+// Phoneme Heatmap & Mouth Guide elements
+const phonemeHeatmapEl = document.getElementById('phoneme-heatmap');
+const articulationSoundBadge = document.getElementById('articulation-sound-badge');
+const artTongueEl = document.getElementById('art-tongue');
+const artLipsEl = document.getElementById('art-lips');
+const artAirflowEl = document.getElementById('art-airflow');
+const artVoicingEl = document.getElementById('art-voicing');
+const artTipEl = document.getElementById('art-tip');
+
+// Minimal Pairs Tracks elements
+const trackTabs = document.querySelectorAll('.track-tab');
+const trackWordsContainer = document.getElementById('vocab-pills');
 
 // State
 let room = null;
@@ -131,16 +149,44 @@ let analyser = null;
 let meterAnimId = null;
 let isMicMuted = false;
 let lastCoachMsg = '';
+let currentTargetWord = 'three';
+let currentBreakdown = [];
+let activeTrackId = 'th-vs-t';
 
-const PHONEME_MAP = {
-    three: '/θɹi/',
-    think: '/θɪŋk/',
-    this: '/ðɪs/',
-    sheep: '/ʃip/',
-    ship: '/ʃɪp/',
-    rice: '/ɹaɪs/',
-    light: '/laɪt/',
-    right: '/ɹaɪt/',
+// Pre-defined minimal pairs tracks (fast client-side lookup)
+const TRACKS_DATA = {
+    'th-vs-t': [
+        { word: 'three', ipa: '/θɹi/' },
+        { word: 'think', ipa: '/θɪŋk/' },
+        { word: 'that', ipa: '/ðæt/' },
+        { word: 'this', ipa: '/ðɪs/' },
+        { word: 'tree', ipa: '/tɹi/' },
+        { word: 'tank', ipa: '/tæŋk/' },
+    ],
+    'r-vs-l': [
+        { word: 'rice', ipa: '/ɹaɪs/' },
+        { word: 'light', ipa: '/laɪt/' },
+        { word: 'right', ipa: '/ɹaɪt/' },
+        { word: 'lake', ipa: '/leɪk/' },
+        { word: 'rake', ipa: '/ɹeɪk/' },
+        { word: 'lead', ipa: '/lid/' },
+    ],
+    'sh-vs-s': [
+        { word: 'ship', ipa: '/ʃɪp/' },
+        { word: 'sheep', ipa: '/ʃip/' },
+        { word: 'sip', ipa: '/sɪp/' },
+        { word: 'seat', ipa: '/sit/' },
+        { word: 'sea', ipa: '/si/' },
+        { word: 'shine', ipa: '/ʃaɪn/' },
+    ],
+    'v-vs-w': [
+        { word: 'voice', ipa: '/vɔɪs/' },
+        { word: 'wave', ipa: '/weɪv/' },
+        { word: 'vine', ipa: '/vaɪn/' },
+        { word: 'wine', ipa: '/waɪn/' },
+        { word: 'vest', ipa: '/vɛst/' },
+        { word: 'west', ipa: '/wɛst/' },
+    ],
 };
 
 // =============================================================================
@@ -190,6 +236,7 @@ async function connect() {
             connectBtnText.textContent = 'Disconnect';
             muteBtn.disabled = false;
             appendTranscript('system', 'Connected to room. Speak a target word clearly into your microphone.');
+            notifyAgentOfWord(currentTargetWord);
         });
 
         // Disconnected
@@ -323,7 +370,253 @@ muteBtn.addEventListener('click', async () => {
 });
 
 // =============================================================================
-// 4. Status & Metrics Updating
+// 4. Send Word Selection to LiveKit Agent
+// =============================================================================
+
+function notifyAgentOfWord(word) {
+    if (room && room.state === ConnectionState.Connected && room.localParticipant) {
+        try {
+            const payload = JSON.stringify({ type: 'select_word', word: word });
+            room.localParticipant.publishData(new TextEncoder().encode(payload), { reliable: true });
+        } catch (err) {
+            console.debug('Failed to publish select_word to agent:', err);
+        }
+    }
+}
+
+// =============================================================================
+// 5. Target Word Selection & Phoneme Breakdown
+// =============================================================================
+
+async function selectTargetWord(word, notify = true) {
+    if (!word) return;
+    const cleanWord = word.trim().toLowerCase().replace(/[^a-z]/g, '');
+    if (!cleanWord) return;
+
+    currentTargetWord = cleanWord;
+    targetWordEl.textContent = cleanWord;
+    if (metricTargetWordEl) metricTargetWordEl.textContent = cleanWord;
+
+    // Highlight pill in active track if present
+    if (trackWordsContainer) {
+        const pills = trackWordsContainer.querySelectorAll('.vocab-pill');
+        pills.forEach((p) => {
+            if (p.getAttribute('data-word') === cleanWord) p.classList.add('active');
+            else p.classList.remove('active');
+        });
+    }
+
+    try {
+        const res = await fetch(`/api/phonemes?word=${encodeURIComponent(cleanWord)}`);
+        if (res.ok) {
+            const data = await res.json();
+            currentBreakdown = data.breakdown || [];
+
+            if (data.ipa) {
+                targetPhonemesEl.textContent = data.ipa;
+            }
+
+            // Render interactive phoneme heatmap
+            renderPhonemeHeatmap(data.phonemes, null, null);
+
+            // Update articulation guide with initial phoneme
+            if (currentBreakdown.length > 0) {
+                const first = currentBreakdown[0];
+                updateArticulationGuide(first.articulation, `${first.phoneme} (/${first.ipa}/)`);
+            }
+        }
+    } catch (err) {
+        console.warn('Phoneme lookup failed:', err);
+    }
+
+    if (notify) {
+        notifyAgentOfWord(cleanWord);
+        appendTranscript('system', `Target word set to "${cleanWord}". Speak it when ready.`);
+    }
+}
+
+// =============================================================================
+// 6. Interactive Syllable & Phoneme Heatmap
+// =============================================================================
+
+function renderPhonemeHeatmap(phonemes, alignment, weakPhoneme) {
+    if (!phonemeHeatmapEl) return;
+    if (!phonemes || phonemes.length === 0) {
+        phonemeHeatmapEl.innerHTML = '<span class="font-mono-label text-ink-3">No phoneme sequence available</span>';
+        return;
+    }
+
+    phonemeHeatmapEl.innerHTML = '';
+
+    // Build alignment lookup if available
+    const alignMap = {};
+    if (Array.isArray(alignment)) {
+        alignment.forEach((item) => {
+            if (item.expected) alignMap[item.expected.toUpperCase()] = item;
+        });
+    }
+
+    phonemes.forEach((ph, idx) => {
+        const norm = ph.toUpperCase();
+        const pill = document.createElement('div');
+        pill.className = 'phoneme-pill';
+        pill.setAttribute('data-phoneme', norm);
+
+        // Find breakdown details
+        const itemInfo = currentBreakdown.find((b) => b.phoneme.toUpperCase() === norm) || {};
+        const ipa = itemInfo.ipa || norm.toLowerCase();
+
+        let statusTag = '';
+
+        if (alignMap[norm]) {
+            const al = alignMap[norm];
+            const confPct = Math.round((al.confidence || 0) * 100);
+            if (al.is_match && confPct >= 70) {
+                statusTag = `✓ ${confPct}%`;
+                pill.classList.add('pass');
+            } else {
+                const obs = al.observed || '?';
+                statusTag = `${obs} ➔ ${norm}`;
+                pill.classList.add('drift');
+            }
+        } else if (weakPhoneme && weakPhoneme.toUpperCase() === norm) {
+            statusTag = 'WEAK';
+            pill.classList.add('drift');
+        } else {
+            statusTag = 'TARGET';
+        }
+
+        pill.innerHTML = `
+            <span class="pill-token">${norm}</span>
+            <span class="pill-ipa">/${ipa}/</span>
+            <span class="pill-status-tag">${statusTag}</span>
+        `;
+
+        // Click to inspect mouth & tongue placement
+        pill.addEventListener('click', () => {
+            phonemeHeatmapEl.querySelectorAll('.phoneme-pill').forEach((p) => p.classList.remove('selected-pill'));
+            pill.classList.add('selected-pill');
+
+            if (itemInfo.articulation) {
+                updateArticulationGuide(itemInfo.articulation, `${norm} (/${ipa}/)`);
+            } else {
+                fetchPhonemeArticulation(norm, ipa);
+            }
+        });
+
+        // Auto-select weak phoneme if diagnosed
+        if (weakPhoneme && weakPhoneme.toUpperCase() === norm) {
+            pill.classList.add('selected-pill');
+        }
+
+        phonemeHeatmapEl.appendChild(pill);
+    });
+}
+
+async function fetchPhonemeArticulation(phoneme, ipa) {
+    try {
+        const res = await fetch(`/api/phonemes?word=${encodeURIComponent(phoneme)}`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data.breakdown && data.breakdown.length > 0) {
+                updateArticulationGuide(data.breakdown[0].articulation, `${phoneme} (/${ipa}/)`);
+            }
+        }
+    } catch (e) {
+        console.debug('Failed to fetch individual articulation:', e);
+    }
+}
+
+// =============================================================================
+// 7. Dynamic Mouth & Tongue Placement Guide
+// =============================================================================
+
+function updateArticulationGuide(guide, soundLabel) {
+    if (!guide) return;
+
+    if (articulationSoundBadge && soundLabel) {
+        articulationSoundBadge.textContent = soundLabel;
+    }
+    if (artTongueEl && guide.tongue) {
+        artTongueEl.textContent = guide.tongue;
+    }
+    if (artLipsEl && guide.lips) {
+        artLipsEl.textContent = guide.lips;
+    }
+    if (artAirflowEl && guide.airflow) {
+        artAirflowEl.textContent = guide.airflow;
+    }
+    if (artVoicingEl && guide.voicing) {
+        artVoicingEl.textContent = guide.voicing;
+    }
+    if (artTipEl) {
+        const tipText = [guide.drill_tip, guide.drift_trap].filter(Boolean).join(' ');
+        artTipEl.textContent = tipText || 'Listen carefully to the slowed corrective model spoken by Rime Mist v3.';
+    }
+}
+
+// =============================================================================
+// 8. Categorized Practice Tracks (Minimal Pairs)
+// =============================================================================
+
+function renderTrack(trackId) {
+    activeTrackId = trackId;
+    const words = TRACKS_DATA[trackId] || TRACKS_DATA['th-vs-t'];
+
+    trackTabs.forEach((tab) => {
+        if (tab.getAttribute('data-track') === trackId) tab.classList.add('active');
+        else tab.classList.remove('active');
+    });
+
+    if (!trackWordsContainer) return;
+    trackWordsContainer.innerHTML = '';
+    words.forEach((item) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `vocab-pill ${item.word === currentTargetWord ? 'active' : ''}`;
+        btn.setAttribute('data-word', item.word);
+        btn.textContent = `${item.word} (${item.ipa})`;
+        btn.addEventListener('click', () => {
+            selectTargetWord(item.word);
+        });
+        trackWordsContainer.appendChild(btn);
+    });
+}
+
+trackTabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+        const trackId = tab.getAttribute('data-track');
+        renderTrack(trackId);
+    });
+});
+
+// =============================================================================
+// 9. Custom Word Input & Suggestion Chips
+// =============================================================================
+
+if (customWordForm) {
+    customWordForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const val = customWordInput ? customWordInput.value.trim() : '';
+        if (val) {
+            selectTargetWord(val);
+            if (customWordInput) customWordInput.blur();
+        }
+    });
+}
+
+suggChips.forEach((chip) => {
+    chip.addEventListener('click', () => {
+        const word = chip.getAttribute('data-word');
+        if (word) {
+            if (customWordInput) customWordInput.value = word;
+            selectTargetWord(word);
+        }
+    });
+});
+
+// =============================================================================
+// 10. Status & Real-Time Metrics Updating
 // =============================================================================
 
 function setStatus(status, text) {
@@ -344,15 +637,16 @@ function updateDrillMetrics(meta) {
     // 1. Target word & phoneme notation
     if (meta.word) {
         const w = meta.word.toLowerCase();
-        targetWordEl.textContent = w;
-        if (metricTargetWordEl) metricTargetWordEl.textContent = w;
-        targetPhonemesEl.textContent = PHONEME_MAP[w] || '';
+        if (w !== currentTargetWord) {
+            currentTargetWord = w;
+            targetWordEl.textContent = w;
+            if (metricTargetWordEl) metricTargetWordEl.textContent = w;
+            selectTargetWord(w, false);
+        }
+    }
 
-        // Update pill active state
-        vocabPills.forEach((p) => {
-            if (p.getAttribute('data-word') === w) p.classList.add('active');
-            else p.classList.remove('active');
-        });
+    if (meta.ipa) {
+        targetPhonemesEl.textContent = meta.ipa;
     }
 
     // 2. Pronunciation score / confidence
@@ -378,7 +672,7 @@ function updateDrillMetrics(meta) {
 
     // 3. Weak phoneme substitution detail
     const detail = meta.phoneme_detail || meta.weak_phoneme || meta.phoneme;
-    if (detail) {
+    if (detail && detail !== '—') {
         weakPhonemeEl.textContent = detail;
     } else {
         weakPhonemeEl.textContent = 'None (Clear!)';
@@ -398,7 +692,18 @@ function updateDrillMetrics(meta) {
         updateDrillBadge(meta.drill_state);
     }
 
-    // 6. Session history strip (last 5 attempts)
+    // 6. Update Phoneme Heatmap if phonemes and alignment provided
+    if (Array.isArray(meta.expected_phonemes) && meta.expected_phonemes.length > 0) {
+        renderPhonemeHeatmap(meta.expected_phonemes, meta.alignment, meta.phoneme);
+    }
+
+    // 7. Update Articulation Guide if provided
+    if (meta.articulation) {
+        const soundTag = meta.phoneme ? `${meta.phoneme} (/${meta.articulation.ipa || ''}/)` : 'WEAK SOUND';
+        updateArticulationGuide(meta.articulation, soundTag);
+    }
+
+    // 8. Session history strip (last 5 attempts)
     if (historyStrip && Array.isArray(meta.history)) {
         if (meta.history.length === 0) {
             historyStrip.innerHTML = '<span class="history-empty font-mono-label">No attempts yet. Click Start Practicing and speak your first word!</span>';
@@ -422,7 +727,7 @@ function updateDrillMetrics(meta) {
 }
 
 // =============================================================================
-// 5. Live Microphone Frequency Visualizer
+// 11. Live Microphone Frequency Visualizer
 // =============================================================================
 
 function setupMicVisualizer() {
@@ -478,7 +783,7 @@ function setupMicVisualizer() {
 }
 
 // =============================================================================
-// 6. Transcript Logging
+// 12. Transcript Logging
 // =============================================================================
 
 function appendTranscript(type, text) {
@@ -495,28 +800,13 @@ function appendTranscript(type, text) {
 }
 
 // =============================================================================
-// 7. Vocabulary Selector Pills
-// =============================================================================
-
-vocabPills.forEach((btn) => {
-    btn.addEventListener('click', () => {
-        vocabPills.forEach((p) => p.classList.remove('active'));
-        btn.classList.add('active');
-
-        const word = btn.getAttribute('data-word');
-        targetWordEl.textContent = word;
-        if (metricTargetWordEl) metricTargetWordEl.textContent = word;
-        targetPhonemesEl.textContent = PHONEME_MAP[word] || '';
-        appendTranscript('system', `Target word set to "${word}". Speak it when ready.`);
-    });
-});
-
-// =============================================================================
-// 8. Auto-connect if ?coach=true or #coach
+// 13. Page Initialization
 // =============================================================================
 
 window.addEventListener('DOMContentLoaded', () => {
     initWaveField();
+    renderTrack('th-vs-t');
+    selectTargetWord('three', false);
 
     if (window.location.search.includes('coach=') || window.location.hash === '#coach') {
         setTimeout(connect, 400);

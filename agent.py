@@ -68,7 +68,14 @@ from config import (
 from drill_manager import CommandType, CancellableDrillPlaybackTask, intercept_command
 from gpt_oss_orchestrator import GptOssOrchestrator
 from phoneme_analyzer import PhonemeAnalyzer
-from phoneme_dict import get_expected_phonemes, has_pronunciation, safe_lookup
+from phoneme_dict import (
+    get_expected_phonemes,
+    get_ipa_transcription,
+    get_phoneme_articulation,
+    get_word_phoneme_breakdown,
+    has_pronunciation,
+    safe_lookup,
+)
 from rime_drill import format_drill_playback, get_speed_alpha
 from session_logger import SessionLogger
 from session_state import DrillState, PronunciationSessionState
@@ -119,6 +126,11 @@ def extract_target_word(transcript: str, fallback_vocab: list) -> Optional[str]:
         # Match as discrete word boundary
         if re.search(rf"\b{re.escape(w)}\b", text):
             return w
+
+    # Single-word utterance check against dictionary
+    clean_words = re.findall(r"[a-zA-Z]+", text)
+    if len(clean_words) == 1 and has_pronunciation(clean_words[0]):
+        return clean_words[0].lower()
 
     return None
 
@@ -194,6 +206,32 @@ async def entrypoint(ctx: JobContext) -> None:
             logger.info(f"Subscribed to user microphone audio track from {participant.identity}")
             asyncio.create_task(_consume_user_audio(track))
 
+    @ctx.room.on("data_received")
+    def _on_data_received(data_packet: rtc.DataPacket):
+        """Handle incoming client data messages (e.g. word selection from custom bar or tracks)."""
+        try:
+            raw_bytes = data_packet.data
+            text = raw_bytes.decode("utf-8") if isinstance(raw_bytes, (bytes, bytearray)) else str(raw_bytes)
+            msg = json.loads(text)
+            if msg.get("type") == "select_word":
+                selected = msg.get("word", "").strip().lower()
+                if selected and has_pronunciation(selected):
+                    logger.info(f"[CLIENT DATA] Selected target word: '{selected}'")
+                    state.current_target_word = selected
+                    state.expected_phonemes = get_expected_phonemes(selected)
+                    state.weak_phoneme = None
+                    state.weak_phoneme_detail = None
+                    state.diagnosis_confidence = 0.0
+                    state.diagnosis_status = "idle"
+                    state.speed_tier = "slow"
+                    state.alignment = []
+                    state._bump_generation()
+                    asyncio.create_task(_broadcast_state())
+                    prompt = f"Target word set to {selected}. Say {selected} whenever you're ready."
+                    _speak_fire_and_forget(prompt)
+        except Exception as e:
+            logger.debug(f"Error handling client data packet: {e}")
+
     _silence_timer_task: Optional[asyncio.Task] = None
 
     def _cancel_silence_watchdog() -> None:
@@ -237,6 +275,10 @@ async def entrypoint(ctx: JobContext) -> None:
                 badge_state = state_val.upper()
 
             speed_alpha = SPEED_TIERS.get(state.speed_tier, 1.0)
+            expected_phs = state.expected_phonemes or get_expected_phonemes(state.current_target_word)
+            ipa_str = get_ipa_transcription(expected_phs)
+            articulation_guide = get_phoneme_articulation(state.weak_phoneme) if state.weak_phoneme else None
+
             payload = json.dumps({
                 "type": "drill_state",
                 "word": state.current_target_word,
@@ -248,6 +290,10 @@ async def entrypoint(ctx: JobContext) -> None:
                 "drill_state": badge_state,
                 "coach_text": _current_agent_text,
                 "history": state.session_history,
+                "expected_phonemes": expected_phs,
+                "alignment": getattr(state, "alignment", []),
+                "ipa": ipa_str,
+                "articulation": articulation_guide,
             })
             if ctx.room and ctx.room.local_participant:
                 await ctx.room.local_participant.publish_data(payload.encode("utf-8"), reliable=True)

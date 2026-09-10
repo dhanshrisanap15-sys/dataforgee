@@ -97,11 +97,32 @@ async def handle_vocab(request: web.Request) -> web.Response:
     })
 
 
+async def handle_phonemes(request: web.Request) -> web.Response:
+    """Return genuine CMUdict phoneme breakdown, IPA notation, and articulation guidance for any word."""
+    word = request.query.get("word", "").strip()
+    if not word:
+        return web.json_response({"error": "Query parameter 'word' is required"}, status=400)
+
+    from phoneme_dict import get_word_phoneme_breakdown
+    breakdown = get_word_phoneme_breakdown(word)
+    return web.json_response(breakdown)
+
+
+async def handle_tracks(request: web.Request) -> web.Response:
+    """Return structured minimal pairs practice tracks."""
+    from phoneme_dict import MINIMAL_PAIRS_TRACKS
+    return web.json_response({
+        "tracks": MINIMAL_PAIRS_TRACKS,
+    })
+
+
 def create_app() -> web.Application:
     app = web.Application(middlewares=[no_cache_middleware])
     app.router.add_get("/token", handle_token)
     app.router.add_get("/health", handle_health)
     app.router.add_get("/api/vocab", handle_vocab)
+    app.router.add_get("/api/phonemes", handle_phonemes)
+    app.router.add_get("/api/tracks", handle_tracks)
     app.router.add_get("/", handle_index)
     app.router.add_static("/static/", WEB_DIR, show_index=False)
     return app

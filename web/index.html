@@ -12,7 +12,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     
     <!-- Unified Luxury Editorial Styling -->
-    <link rel="stylesheet" href="/static/style.css?v=5">
+    <link rel="stylesheet" href="/static/style.css?v=6">
 </head>
 <body class="grain">
     <!-- Ambient Interactive WaveField Canvas -->
@@ -69,6 +69,34 @@
                 Speak naturally into your microphone. Say That Sound analyzes your voice at the phoneme level and uses Rime to model the corrective sound in real time.
             </p>
 
+            <!-- Custom Word Input Bar -->
+            <div class="custom-word-bar-wrap">
+                <form id="custom-word-form" class="custom-word-form" onsubmit="return false;">
+                    <div class="input-with-icon">
+                        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <input type="text" id="custom-word-input" class="custom-word-input font-sans" placeholder="Type any word (e.g. squirrel, rhythm, worcestershire, February)..." autocomplete="off" spellcheck="false">
+                    </div>
+                    <button type="submit" id="custom-word-submit" class="custom-word-btn font-mono-label">
+                        <span>Coach Word</span>
+                        <svg class="btn-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                            <polyline points="12 5 19 12 12 19"></polyline>
+                        </svg>
+                    </button>
+                </form>
+                <div class="suggestion-chips font-mono-label">
+                    <span class="suggestion-label">Try challenging words:</span>
+                    <button type="button" class="sugg-chip" data-word="squirrel">squirrel</button>
+                    <button type="button" class="sugg-chip" data-word="rhythm">rhythm</button>
+                    <button type="button" class="sugg-chip" data-word="rural">rural</button>
+                    <button type="button" class="sugg-chip" data-word="comfortable">comfortable</button>
+                    <button type="button" class="sugg-chip" data-word="worcestershire">worcestershire</button>
+                </div>
+            </div>
+
             <!-- Active Target Word Spotlight -->
             <div class="target-spotlight-card">
                 <div class="spotlight-top">
@@ -77,18 +105,30 @@
                 </div>
                 <div id="target-word" class="spotlight-word font-display">three</div>
 
-                <!-- Quick Vocabulary Selection Pills -->
+                <!-- Interactive Syllable & Phoneme Heatmap -->
+                <div class="phoneme-heatmap-wrap">
+                    <div class="heatmap-header font-mono-label">
+                        <span>PHONEME HEATMAP & ACOUSTIC ALIGNMENT</span>
+                        <span class="heatmap-hint">Click sound for mouth placement</span>
+                    </div>
+                    <div id="phoneme-heatmap" class="phoneme-heatmap font-mono-label">
+                        <!-- Populated dynamically: [ TH (/θ/) ] - [ R (/ɹ/) ] - [ IY (/i/) ] -->
+                    </div>
+                </div>
+
+                <!-- Categorized Practice Tracks (Minimal Pairs) -->
                 <div class="vocab-selector">
-                    <span class="vocab-intro font-mono-label">PRACTICE WORDS:</span>
+                    <div class="tracks-header font-mono-label">
+                        <span>MINIMAL PAIR TRACKS:</span>
+                        <div class="tracks-nav">
+                            <button type="button" class="track-tab active" data-track="th-vs-t">TH vs T</button>
+                            <button type="button" class="track-tab" data-track="r-vs-l">R vs L</button>
+                            <button type="button" class="track-tab" data-track="sh-vs-s">SH vs S</button>
+                            <button type="button" class="track-tab" data-track="v-vs-w">V vs W</button>
+                        </div>
+                    </div>
                     <div id="vocab-pills" class="vocab-pills font-mono-label">
-                        <button class="vocab-pill active" data-word="three">three (/θɹi/)</button>
-                        <button class="vocab-pill" data-word="think">think (/θɪŋk/)</button>
-                        <button class="vocab-pill" data-word="this">this (/ðɪs/)</button>
-                        <button class="vocab-pill" data-word="sheep">sheep (/ʃip/)</button>
-                        <button class="vocab-pill" data-word="ship">ship (/ʃɪp/)</button>
-                        <button class="vocab-pill" data-word="rice">rice (/ɹaɪs/)</button>
-                        <button class="vocab-pill" data-word="light">light (/laɪt/)</button>
-                        <button class="vocab-pill" data-word="right">right (/ɹaɪt/)</button>
+                        <!-- Rendered dynamically based on active track -->
                     </div>
                 </div>
             </div>
@@ -125,6 +165,48 @@
                     <span id="mic-status-label">AEC + Noise Suppression Active</span>
                 </div>
                 <canvas id="mic-meter" class="mic-canvas" width="800" height="56"></canvas>
+            </div>
+        </section>
+
+        <!-- Dynamic Mouth & Tongue Articulation Placement Guide -->
+        <section class="articulation-section">
+            <div class="articulation-card" id="articulation-card">
+                <div class="articulation-header font-mono-label">
+                    <div class="header-left">
+                        <span class="vocal-icon">🗣️</span>
+                        <span>MOUTH & TONGUE PLACEMENT GUIDE</span>
+                    </div>
+                    <span id="articulation-sound-badge" class="badge badge-coaching font-mono-label">TH (/θ/)</span>
+                </div>
+                
+                <div class="articulation-body">
+                    <div class="art-grid">
+                        <div class="art-item">
+                            <span class="art-label font-mono-label">TONGUE PLACEMENT</span>
+                            <p id="art-tongue" class="art-desc font-sans">Place the tip of your tongue gently between your upper and lower front teeth. Do not clamp down.</p>
+                        </div>
+                        <div class="art-item">
+                            <span class="art-label font-mono-label">LIP & JAW POSTURE</span>
+                            <p id="art-lips" class="art-desc font-sans">Relaxed and slightly parted; keep your jaw loose.</p>
+                        </div>
+                        <div class="art-item">
+                            <span class="art-label font-mono-label">AIRFLOW DYNAMICS</span>
+                            <p id="art-airflow" class="art-desc font-sans">Blow a soft, continuous stream of unvoiced air over the tongue tip.</p>
+                        </div>
+                        <div class="art-item">
+                            <span class="art-label font-mono-label">VOICING & RESONANCE</span>
+                            <p id="art-voicing" class="art-desc font-sans">Unvoiced — vocal cords stay still (whisper airflow only).</p>
+                        </div>
+                    </div>
+
+                    <div class="art-callout" id="art-callout">
+                        <div class="art-callout-icon">💡</div>
+                        <div class="art-callout-content">
+                            <span class="art-callout-title font-mono-label">CLINICAL DRILL TIP & COMMON DRIFT</span>
+                            <p id="art-tip" class="art-callout-text font-sans">Look in a mirror to ensure the tongue tip visibly peeks out. Avoid pulling the tongue behind teeth (which sounds like 'S' or 'T').</p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -204,6 +286,6 @@
     </footer>
 
     <!-- LiveKit Client SDK (ESM) -->
-    <script type="module" src="/static/app.js?v=5"></script>
+    <script type="module" src="/static/app.js?v=6"></script>
 </body>
 </html>

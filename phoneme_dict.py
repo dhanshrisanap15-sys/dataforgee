@@ -18,7 +18,7 @@ Known limitations:
 """
 
 import re
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 # Deterministic reference vocabulary based on CMUdict (stress numbers stripped)
 CMU_REFERENCE_DICT = {

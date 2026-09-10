@@ -66,6 +66,9 @@ class PronunciationSessionState:
     # Session history strip — tracks last 5 attempts with pass/fail
     session_history: List[Dict[str, Any]] = field(default_factory=list)
 
+    # Aligned phoneme details for interactive phoneme heatmap
+    alignment: List[Dict[str, Any]] = field(default_factory=list)
+
     def _new_drill_id(self) -> str:
         """Generate a new unique drill ID."""
         return str(uuid.uuid4())[:8]
@@ -118,6 +121,7 @@ class PronunciationSessionState:
         self.weak_phoneme = None
         self.weak_phoneme_detail = None
         self.speed_tier = "normal"
+        self.alignment = []
         self._bump_generation()
         return self.current_target_word
 
@@ -136,6 +140,10 @@ class PronunciationSessionState:
         score = getattr(diag, "pronunciation_score", 0.0)
         self.diagnosis_confidence = score if score > 0 else diag.weak_phoneme_confidence
         self.diagnosis_status = diag.diagnosis_status
+        if hasattr(diag, "alignment") and diag.alignment:
+            self.alignment = [item.to_dict() if hasattr(item, "to_dict") else item for item in diag.alignment]
+        else:
+            self.alignment = []
         self.drill_attempt += 1
         self.last_interrupted = False
         self.drill_id = self._new_drill_id()
