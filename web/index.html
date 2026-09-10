@@ -3,73 +3,414 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Say That Sound — Voice Pronunciation Coach</title>
-    <meta name="description" content="Real-time pronunciation coaching voice agent powered by Rime TTS and LiveKit">
+    <title>say that sound — the AI pronunciation coach that never stops you</title>
+    <meta name="description" content="Speak in full sentences. Say that sound follows every syllable as it leaves your mouth and slips corrections into the conversation — powered by LiveKit and Rime TTS.">
+    
+    <!-- Typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=3">
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Design & Styling -->
+    <link rel="stylesheet" href="/static/style.css?v=4">
 </head>
-<body>
-    <div id="app">
-        <header>
-            <div class="logo-row">
-                <div class="logo-icon">🔊</div>
-                <div>
-                    <h1>Say That Sound</h1>
-                    <p class="subtitle">Voice Pronunciation Coach</p>
+<body class="grain">
+    <!-- Navigation -->
+    <header class="site-header" data-testid="site-nav">
+        <div class="nav-container">
+            <a href="#" class="brand-logo font-display">say that sound</a>
+            <nav class="nav-links font-mono-label">
+                <a href="#how" class="link-underline">How it works</a>
+                <a href="#compare" class="link-underline">Compare</a>
+            </nav>
+            <div class="nav-actions">
+                <button id="nav-start-btn" class="btn-pill-dark font-display" data-testid="nav-start-analyzing-button">
+                    Start Analyzing
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <!-- Hero Section -->
+        <section class="hero-section" data-testid="hero-section">
+            <div class="hairline-grid radial-fade"></div>
+            
+            <!-- Live interactive wavefield canvas -->
+            <div class="wave-container wave-mask">
+                <canvas id="hero-wave-canvas" class="hero-wave-canvas" aria-hidden="true"></canvas>
+            </div>
+
+            <div class="hero-content">
+                <!-- Live phoneme stream chip -->
+                <div class="status-chip font-mono-label">
+                    <span class="chip-pulse">
+                        <span class="pulse-ring"></span>
+                        <span class="pulse-dot"></span>
+                    </span>
+                    Live phoneme stream · 120ms
+                </div>
+
+                <!-- Main headline -->
+                <h1 class="hero-title font-display">
+                    <span class="hero-line">The pronunciation coach</span>
+                    <span class="hero-line">that listens without</span>
+                    <span class="hero-line"><em class="text-moss">stopping you.</em></span>
+                </h1>
+
+                <!-- Subtitle -->
+                <p class="hero-subtitle">
+                    Speak in full sentences. Say that sound follows every syllable as it leaves your mouth and slips corrections into the conversation — the way a real teacher would, never a pause button.
+                </p>
+
+                <!-- CTA -->
+                <div class="hero-cta-wrap">
+                    <button id="hero-start-btn" class="hero-cta-btn" data-testid="hero-start-analyzing-button">
+                        <span class="cta-slide-bg"></span>
+                        <svg class="cta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                            <line x1="12" y1="19" x2="12" y2="22"></line>
+                        </svg>
+                        <span class="cta-text">Start Analyzing</span>
+                        <svg class="cta-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                            <polyline points="12 5 19 12 12 19"></polyline>
+                        </svg>
+                    </button>
+                    <span class="hero-subnote font-mono-label">No headset. No turn-taking. Just talk.</span>
                 </div>
             </div>
-        </header>
+        </section>
 
-        <div id="status-bar">
-            <div class="status-left">
-                <span id="connection-dot" class="dot disconnected"></span>
-                <span id="connection-text">Disconnected</span>
-            </div>
-            <div class="status-right">
-                <span id="drill-state-badge" class="badge badge-idle">IDLE</span>
+        <!-- Marquee 1 -->
+        <div class="marquee-wrapper" data-testid="editorial-marquee">
+            <div class="marquee-track font-mono-label">
+                <div class="marquee-content">
+                    <span>FLUID CONVERSATIONAL FLOW <span class="marquee-dot"></span></span>
+                    <span>MICRO-PHONEME STREAM ANALYSIS <span class="marquee-dot"></span></span>
+                    <span>ZERO LATENCY FEEDBACK <span class="marquee-dot"></span></span>
+                    <span>HUMAN TEACHER DYNAMICS <span class="marquee-dot"></span></span>
+                    <span>PITCH CONTOUR TUNING <span class="marquee-dot"></span></span>
+                    <span>REAL-TIME ACCENT CORRECTION <span class="marquee-dot"></span></span>
+                </div>
+                <div class="marquee-content" aria-hidden="true">
+                    <span>FLUID CONVERSATIONAL FLOW <span class="marquee-dot"></span></span>
+                    <span>MICRO-PHONEME STREAM ANALYSIS <span class="marquee-dot"></span></span>
+                    <span>ZERO LATENCY FEEDBACK <span class="marquee-dot"></span></span>
+                    <span>HUMAN TEACHER DYNAMICS <span class="marquee-dot"></span></span>
+                    <span>PITCH CONTOUR TUNING <span class="marquee-dot"></span></span>
+                    <span>REAL-TIME ACCENT CORRECTION <span class="marquee-dot"></span></span>
+                </div>
             </div>
         </div>
 
-        <!-- Drill Info Panel -->
-        <div id="drill-info" class="panel hidden">
-            <div class="info-grid">
-                <div class="info-item">
-                    <span class="info-label">Target Word</span>
-                    <span id="target-word" class="info-value">—</span>
+        <!-- Manifesto / "How it works" Section -->
+        <section id="how" class="manifesto-section" data-testid="manifesto-section">
+            <div class="section-header">
+                <div class="section-tag font-mono-label" data-testid="manifesto-label">
+                    <span class="tag-dash"></span> How it works
                 </div>
-                <div class="info-item">
-                    <span class="info-label">Weak Phoneme</span>
-                    <span id="weak-phoneme" class="info-value">—</span>
+                <h2 class="section-title font-display">Three ideas that make it feel like a person, not a test.</h2>
+            </div>
+
+            <div class="chapters-grid">
+                <!-- Chapter 01 -->
+                <article class="chapter-card" data-testid="manifesto-chapter-01">
+                    <div class="chapter-text">
+                        <span class="chapter-num font-mono-label">01</span>
+                        <h3 class="chapter-title font-display">Continuous dual-stream audio</h3>
+                        <p class="chapter-body">
+                            Never hit a record button again. As you speak, our streaming acoustic model parses your voice frame by frame without freezing the dialogue.
+                        </p>
+                    </div>
+                    <div class="chapter-media">
+                        <img src="https://images.unsplash.com/photo-1581368129682-e2d66324045b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNTl8MHwxfHNlYXJjaHwyfHxwZXJzb24lMjBzcGVha2luZyUyMHBvZGNhc3QlMjBsYW5ndWFnZSUyMHRlYWNoZXIlMjBtaWNyb3Bob25lJTIwaGVhZHBob25lJTIwcG9ydHJhaXR8ZW58MHx8fHwxNzg5MDM2ODE2fDA&ixlib=rb-4.1.0&q=85" 
+                             alt="Continuous dual-stream voice analysis" loading="lazy">
+                        <div class="media-overlay"></div>
+                    </div>
+                </article>
+
+                <!-- Chapter 02 -->
+                <article class="chapter-card reverse" data-testid="manifesto-chapter-02">
+                    <div class="chapter-text">
+                        <span class="chapter-num font-mono-label">02</span>
+                        <h3 class="chapter-title font-display">Micro-phoneme heatmaps</h3>
+                        <p class="chapter-body">
+                            See exactly which syllables drift. Mouth-shape guides and pitch contour overlays show you the fix instead of handing you a percentage.
+                        </p>
+                    </div>
+                    <div class="chapter-media">
+                        <img src="https://images.unsplash.com/photo-1655947717064-d856af599bd1?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNTl8MHwxfHNlYXJjaHwzfHxwZXJzb24lMjBzcGVha2luZyUyMHBvZGNhc3QlMjBsYW5ndWFnZSUyMHRlYWNoZXIlMjBtaWNyb3Bob25lJTIwaGVhZHBob25lJTIwcG9ydHJhaXR8ZW58MHx8fHwxNzg5MDM2ODE2fDA&ixlib=rb-4.1.0&q=85" 
+                             alt="Phoneme analysis heatmaps" loading="lazy">
+                        <div class="media-overlay"></div>
+                    </div>
+                </article>
+
+                <!-- Chapter 03 -->
+                <article class="chapter-card" data-testid="manifesto-chapter-03">
+                    <div class="chapter-text">
+                        <span class="chapter-num font-mono-label">03</span>
+                        <h3 class="chapter-title font-display">Gentle interruption protocol</h3>
+                        <p class="chapter-body">
+                            Like a patient tutor, say that sound offers a soft cue and a repeat loop only when accent drift threatens being understood.
+                        </p>
+                    </div>
+                    <div class="chapter-media">
+                        <img src="https://images.unsplash.com/photo-1593697909683-bccb1b9e68a4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNTl8MHwxfHNlYXJjaHwxfHxwZXJzb24lMjBzcGVha2luZyUyMHBvZGNhc3QlMjBsYW5ndWFnZSUyMHRlYWNoZXIlMjBtaWNyb3Bob25lJTIwaGVhZHBob25lJTIwcG9ydHJhaXR8ZW58MHx8fHwxNzg5MDM2ODE2fDA&ixlib=rb-4.1.0&q=85" 
+                             alt="Gentle voice coaching" loading="lazy">
+                        <div class="media-overlay"></div>
+                    </div>
+                </article>
+            </div>
+        </section>
+
+        <!-- Comparison Section -->
+        <section id="compare" class="comparison-section" data-testid="comparison-section">
+            <div class="comparison-container">
+                <div class="section-header">
+                    <div class="section-tag font-mono-label" data-testid="comparison-label">
+                        <span class="tag-dash"></span> The competition
+                    </div>
+                    <h2 class="section-title font-display">Everyone else makes you take turns. We just let you talk.</h2>
+                    <p class="section-subtitle">
+                        Drill apps pause you after every line. General voice assistants never notice your pronunciation at all. Here is exactly where the difference sits.
+                    </p>
                 </div>
-                <div class="info-item">
-                    <span class="info-label">Confidence</span>
-                    <span id="confidence" class="info-value">—</span>
+
+                <!-- Desktop Comparison Table -->
+                <div class="comparison-table-wrapper">
+                    <table class="comparison-table">
+                        <thead>
+                            <tr>
+                                <th class="col-metric"></th>
+                                <th class="col-competitor" data-testid="comparison-col-a">
+                                    <span class="col-tag font-mono-label">Rigid</span>
+                                    <h3 class="col-name font-display">Duolingo · ELSA · Rosetta</h3>
+                                </th>
+                                <th class="col-competitor" data-testid="comparison-col-b">
+                                    <span class="col-tag font-mono-label">Blind</span>
+                                    <h3 class="col-name font-display">ChatGPT Voice · Siri</h3>
+                                </th>
+                                <th class="col-us" data-testid="comparison-col-c">
+                                    <span class="col-tag font-mono-label">Ours</span>
+                                    <h3 class="col-name font-display">say that sound</h3>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="metric-label font-mono-label">Conversation flow</td>
+                                <td class="metric-val">Turn-based: speak, wait, get graded</td>
+                                <td class="metric-val">Chats freely, ignores how you said it</td>
+                                <td class="metric-val highlighted">One continuous dual-stream voice loop</td>
+                            </tr>
+                            <tr>
+                                <td class="metric-label font-mono-label">Interruption style</td>
+                                <td class="metric-val">Hard stop after every sentence</td>
+                                <td class="metric-val">Talks over you or waits for silence</td>
+                                <td class="metric-val highlighted">Soft micro-cues woven into your sentence</td>
+                            </tr>
+                            <tr>
+                                <td class="metric-label font-mono-label">Feedback depth</td>
+                                <td class="metric-val">A static accuracy percentage</td>
+                                <td class="metric-val">Semantic only — what, never how</td>
+                                <td class="metric-val highlighted">Tongue position, pitch contour, vowel resonance</td>
+                            </tr>
+                            <tr>
+                                <td class="metric-label font-mono-label">Real-time coaching</td>
+                                <td class="metric-val"><span class="mark mark-no">✕ No</span></td>
+                                <td class="metric-val"><span class="mark mark-no">✕ No</span></td>
+                                <td class="metric-val highlighted"><span class="mark mark-yes">✓ Yes</span></td>
+                            </tr>
+                            <tr>
+                                <td class="metric-label font-mono-label">Feels like a human teacher</td>
+                                <td class="metric-val"><span class="mark mark-no">✕ No</span></td>
+                                <td class="metric-val"><span class="mark mark-partial">— Sort of</span></td>
+                                <td class="metric-val highlighted"><span class="mark mark-yes">✓ Yes</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
-                <div class="info-item">
-                    <span class="info-label">Speed</span>
-                    <span id="speed-tier" class="info-value">—</span>
+            </div>
+        </section>
+
+        <!-- Marquee 2 (Reverse) -->
+        <div class="marquee-wrapper">
+            <div class="marquee-track-slow font-mono-label">
+                <div class="marquee-content">
+                    <span>FLUID CONVERSATIONAL FLOW <span class="marquee-dot"></span></span>
+                    <span>MICRO-PHONEME STREAM ANALYSIS <span class="marquee-dot"></span></span>
+                    <span>ZERO LATENCY FEEDBACK <span class="marquee-dot"></span></span>
+                    <span>HUMAN TEACHER DYNAMICS <span class="marquee-dot"></span></span>
+                    <span>PITCH CONTOUR TUNING <span class="marquee-dot"></span></span>
+                    <span>REAL-TIME ACCENT CORRECTION <span class="marquee-dot"></span></span>
+                </div>
+                <div class="marquee-content" aria-hidden="true">
+                    <span>FLUID CONVERSATIONAL FLOW <span class="marquee-dot"></span></span>
+                    <span>MICRO-PHONEME STREAM ANALYSIS <span class="marquee-dot"></span></span>
+                    <span>ZERO LATENCY FEEDBACK <span class="marquee-dot"></span></span>
+                    <span>HUMAN TEACHER DYNAMICS <span class="marquee-dot"></span></span>
+                    <span>PITCH CONTOUR TUNING <span class="marquee-dot"></span></span>
+                    <span>REAL-TIME ACCENT CORRECTION <span class="marquee-dot"></span></span>
                 </div>
             </div>
         </div>
 
-        <div id="controls">
-            <button id="connect-btn">Connect</button>
-        </div>
+        <!-- Closing CTA Section -->
+        <section class="closing-section" data-testid="closing-section">
+            <div class="hairline-grid radial-fade"></div>
+            <div class="closing-content">
+                <h2 class="closing-title font-display">
+                    Say it once. We will hear <span class="text-moss">every sound in it.</span>
+                </h2>
+                <p class="closing-subtitle">
+                    Open your mic and start a real conversation. Corrections arrive while you are still speaking.
+                </p>
+                <button id="closing-start-btn" class="closing-cta-btn" data-testid="closing-start-analyzing-button">
+                    <span>Start Analyzing</span>
+                    <svg class="cta-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                        <polyline points="12 5 19 12 12 19"></polyline>
+                    </svg>
+                </button>
+            </div>
+        </section>
+    </main>
 
-        <div id="mic-section">
-            <label>Mic Level</label>
-            <canvas id="mic-meter" width="300" height="24"></canvas>
+    <!-- Footer -->
+    <footer class="site-footer" data-testid="site-footer">
+        <div class="footer-container">
+            <span class="footer-brand font-display">say that sound</span>
+            <div class="footer-links font-mono-label">
+                <a href="#how" class="link-underline">Manifesto</a>
+                <a href="#compare" class="link-underline">Research</a>
+                <a href="mailto:team@saythatsound.ai" class="link-underline">Contact</a>
+            </div>
+            <span class="footer-copy font-mono-label">© 2026</span>
         </div>
+    </footer>
 
-        <div id="transcript-section">
-            <label>Transcript Log</label>
-            <div id="transcript-log"></div>
+    <!-- ========================================================================= -->
+    <!-- INTERACTIVE VOICE COACHING STUDIO MODAL (LiveKit + Rime TTS)             -->
+    <!-- ========================================================================= -->
+    <div id="coach-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-card">
+            <!-- Modal Header / Status Bar -->
+            <div class="modal-header">
+                <div class="modal-header-left">
+                    <span id="connection-dot" class="dot disconnected"></span>
+                    <div>
+                        <div class="modal-title font-display" id="modal-title">Voice Pronunciation Studio</div>
+                        <div id="connection-text" class="modal-subtitle font-mono-label">Ready to connect</div>
+                    </div>
+                </div>
+                
+                <div class="modal-header-right">
+                    <span id="drill-state-badge" class="badge badge-idle font-mono-label">IDLE</span>
+                    <div class="powered-by-tag font-mono-label">
+                        <span class="sparkle">⚡</span> Powered by <strong>Rime TTS</strong>
+                    </div>
+                    <button id="close-modal-btn" class="modal-close-btn" aria-label="Close studio">✕</button>
+                </div>
+            </div>
+
+            <!-- Studio Main Content -->
+            <div class="modal-body">
+                <!-- 2x2 Real-Time Metrics Card -->
+                <div class="metrics-grid">
+                    <div class="metric-box target-box">
+                        <div class="metric-label font-mono-label">TARGET WORD</div>
+                        <div class="metric-value-row">
+                            <span id="target-word" class="target-word-val font-display">—</span>
+                            <span id="target-phonemes" class="target-phonemes-val font-mono-label"></span>
+                        </div>
+                    </div>
+
+                    <div class="metric-box score-box">
+                        <div class="metric-label font-mono-label">PRONUNCIATION SCORE</div>
+                        <div class="metric-value-row">
+                            <span id="confidence" class="score-val font-display">—</span>
+                            <span id="score-status" class="score-status font-mono-label"></span>
+                        </div>
+                    </div>
+
+                    <div class="metric-box phoneme-box">
+                        <div class="metric-label font-mono-label">WEAK PHONEME / SUBSTITUTION</div>
+                        <div class="metric-value-row">
+                            <span id="weak-phoneme" class="phoneme-val font-mono-label">—</span>
+                        </div>
+                    </div>
+
+                    <div class="metric-box speed-box">
+                        <div class="metric-label font-mono-label">CORRECTIVE RIME MODEL SPEED</div>
+                        <div class="metric-value-row">
+                            <span id="speed-tier" class="speed-val font-display">—</span>
+                            <span id="speed-label" class="speed-label font-mono-label">Normal</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live Audio Waveform & Level Meter -->
+                <div class="mic-visualizer-container">
+                    <div class="vis-header font-mono-label">
+                        <span>LIVE MICROPHONE STREAM</span>
+                        <span id="mic-status-label">AEC + NS Enabled</span>
+                    </div>
+                    <canvas id="mic-meter" class="mic-canvas" width="600" height="48"></canvas>
+                </div>
+
+                <!-- Session History Strip (Last 5 attempts with pass/fail) -->
+                <div class="history-container">
+                    <div class="history-label font-mono-label">RECENT ATTEMPTS (LAST 5)</div>
+                    <div id="history-strip" class="history-strip">
+                        <span class="history-empty font-mono-label">No attempts yet. Speak your first word!</span>
+                    </div>
+                </div>
+
+                <!-- Quick Vocabulary Selector -->
+                <div class="vocab-container">
+                    <div class="vocab-label font-mono-label">PRACTICE WORDS:</div>
+                    <div id="vocab-pills" class="vocab-pills font-mono-label">
+                        <button class="vocab-pill active" data-word="three">three (/θɹi/)</button>
+                        <button class="vocab-pill" data-word="think">think (/θɪŋk/)</button>
+                        <button class="vocab-pill" data-word="sheep">sheep (/ʃip/)</button>
+                        <button class="vocab-pill" data-word="ship">ship (/ʃɪp/)</button>
+                        <button class="vocab-pill" data-word="rice">rice (/ɹaɪs/)</button>
+                        <button class="vocab-pill" data-word="light">light (/laɪt/)</button>
+                    </div>
+                </div>
+
+                <!-- Live Coach Transcript Log -->
+                <div class="transcript-container">
+                    <div class="transcript-header font-mono-label">
+                        <span>LIVE COACHING TRANSCRIPT</span>
+                        <span class="transcript-sub">Continuous acoustic stream</span>
+                    </div>
+                    <div id="transcript-log" class="transcript-log">
+                        <div class="transcript-msg system font-mono-label">
+                            [System] Ready to start voice session. Click Connect to speak with Rime TTS.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal Footer Controls -->
+            <div class="modal-footer">
+                <button id="connect-btn" class="studio-btn primary-btn font-mono-label">
+                    Connect & Start Speaking
+                </button>
+                <button id="mute-btn" class="studio-btn secondary-btn font-mono-label" disabled>
+                    Mute Mic
+                </button>
+                <button id="disconnect-btn" class="studio-btn danger-btn font-mono-label" disabled>
+                    Disconnect
+                </button>
+            </div>
         </div>
     </div>
 
-    <!-- LiveKit Client SDK (ESM from CDN) -->
-    <script type="module" src="/static/app.js?v=3"></script>
+    <!-- LiveKit Client SDK (ESM) -->
+    <script type="module" src="/static/app.js?v=4"></script>
 </body>
 </html>

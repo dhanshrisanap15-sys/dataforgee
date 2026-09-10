@@ -77,9 +77,31 @@ async def no_cache_middleware(request, handler):
     return response
 
 
+async def handle_health(request: web.Request) -> web.Response:
+    """Service health check endpoint."""
+    has_livekit = bool(LIVEKIT_API_KEY and LIVEKIT_API_SECRET and LIVEKIT_URL)
+    return web.json_response({
+        "status": "healthy" if has_livekit else "degraded",
+        "livekit_configured": has_livekit,
+        "token_server": "running",
+        "livekit_url": LIVEKIT_URL,
+    })
+
+
+async def handle_vocab(request: web.Request) -> web.Response:
+    """Return available practice vocabulary."""
+    from config import TARGET_VOCABULARY
+    return web.json_response({
+        "vocabulary": TARGET_VOCABULARY,
+        "count": len(TARGET_VOCABULARY),
+    })
+
+
 def create_app() -> web.Application:
     app = web.Application(middlewares=[no_cache_middleware])
     app.router.add_get("/token", handle_token)
+    app.router.add_get("/health", handle_health)
+    app.router.add_get("/api/vocab", handle_vocab)
     app.router.add_get("/", handle_index)
     app.router.add_static("/static/", WEB_DIR, show_index=False)
     return app

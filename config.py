@@ -10,20 +10,28 @@ import os
 # ---------------------------------------------------------------------------
 # Rime TTS
 # ---------------------------------------------------------------------------
-RIME_MODEL = "mistv3"
-RIME_SPEAKER = "astra"
+RIME_MODEL = os.environ.get("RIME_MODEL_ID", os.environ.get("RIME_MODEL", "mistv3"))
+RIME_MODEL_ID = RIME_MODEL
+RIME_SPEAKER = os.environ.get("RIME_SPEAKER", "astra")
 RIME_LANGUAGE = "eng"
 RIME_WS_ENDPOINT = "wss://users-ws.rime.ai"  # default Rime WebSocket endpoint
 RIME_AUDIO_FORMAT = "pcm"
 RIME_SAMPLE_RATE = 16000
 RIME_SPEED_ALPHA = 1.0
 
-# Speed tiers for pronunciation drilling
+# Speed tiers for pronunciation drilling: 1.0x normal, 0.8x slow, 0.65x slower, 0.5x slow-replay
 SPEED_TIERS = {
     "normal": 1.0,
     "slow": 0.80,
     "slower": 0.65,
+    "slow_replay": 0.50,
 }
+SLOW_REPLAY_SPEED = 0.50
+
+# Thresholds for grading pronunciation attempts
+PASS_THRESHOLD = 0.75          # >= 75%: positive feedback, pass mark, advance word
+SLOW_REPLAY_THRESHOLD = 0.60   # < 60%: slow-replay corrective model at 0.5x speed
+SILENCE_TIMEOUT_SECONDS = 5.0  # 5s of no speech -> prompt user
 
 # ---------------------------------------------------------------------------
 # Deepgram STT
@@ -33,8 +41,8 @@ DEEPGRAM_MODEL = "nova-3"
 # ---------------------------------------------------------------------------
 # GPT-OSS Orchestration LLM
 # ---------------------------------------------------------------------------
-GPT_OSS_MODEL = os.environ.get("GPT_OSS_MODEL", "gpt-oss-120b")
-GPT_OSS_BASE_URL = os.environ.get("GPT_OSS_BASE_URL", "https://api.livekit.io/v1")
+GPT_OSS_MODEL = os.environ.get("GPT_OSS_MODEL", "openai/gpt-oss-120b")
+GPT_OSS_BASE_URL = os.environ.get("GPT_OSS_BASE_URL", "https://api.groq.com/openai/v1")
 GPT_OSS_API_KEY = os.environ.get("GPT_OSS_API_KEY", "")
 
 # Step 1 fallback/compatibility

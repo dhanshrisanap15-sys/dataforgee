@@ -21,6 +21,7 @@ Supported actions:
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -196,10 +197,15 @@ class GptOssOrchestrator:
             speed_tier=state.speed_tier,
         )
 
-    def validate_action(self, action: DrillAction, state: PronunciationSessionState) -> DrillAction:
+    def validate_action(
+        self,
+        action: DrillAction,
+        state: PronunciationSessionState,
+        diagnosis: Optional[Dict[str, Any]] = None,
+    ) -> DrillAction:
         """
-        Validate an action's fields against current state.
-        Ensures word and phoneme match state, rejects invalid speed tiers.
+        Validate an action's fields against current state and diagnosis.
+        Enforces that GPT-OSS must NOT determine or alter the mispronounced phoneme.
         """
         # Validate action type
         if action.action not in VALID_ACTIONS:
@@ -207,31 +213,146 @@ class GptOssOrchestrator:
             action.action = "DEMO_WORD"
 
         # Validate speed tier
-        valid_tiers = {"normal", "slow", "slower"}
+        valid_tiers = {"normal", "slow", "slower", "slow_replay"}
         if action.speed_tier not in valid_tiers:
             logger.warning(f"Invalid speed_tier '{action.speed_tier}', defaulting to 'slow'")
-            action.speed_tier = "slow"
+            action.speed_tier = state.speed_tier or "slow"
 
         # Validate word exists
         if not action.word:
             action.word = state.current_target_word or "three"
+
+        # Architectural Rule: Phoneme diagnoses strictly originate from the phoneme analyzer
+        if diagnosis:
+            diag_phoneme = diagnosis.get("weak_phoneme")
+            if diag_phoneme:
+                action.phoneme = diag_phoneme
+            elif diagnosis.get("diagnosis_status") in ("perfect", "low_confidence", "no_input"):
+                action.phoneme = None
 
         return action
 
     def parse_llm_json_response(self, response_text: str) -> Optional[DrillAction]:
         """Validate and parse a raw JSON response from a remote GPT-OSS model."""
         try:
-            data = json.loads(response_text)
-            action = data.get("action", "").upper()
+            cleaned = response_text.strip()
+            # Strip markdown code fences if present
+            if cleaned.startswith("```"):
+                cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+                cleaned = re.sub(r"\s*```$", "", cleaned)
+            try:
+                data = json.loads(cleaned)
+            except Exception:
+                # Try json_repair if available for robust handling of minor LLM syntax glitches
+                try:
+                    import json_repair
+                    data = json_repair.loads(cleaned)
+                except Exception:
+                    raise
+
+            action = str(data.get("action", "")).upper().strip()
             if action not in VALID_ACTIONS:
                 return None
             return DrillAction(
                 action=action,
-                spoken_response=data.get("spoken_response", ""),
+                spoken_response=str(data.get("spoken_response", "")).strip(),
                 phoneme=data.get("phoneme"),
-                word=data.get("word", ""),
-                speed_tier=data.get("speed_tier", "slow"),
+                word=str(data.get("word", "")).strip(),
+                speed_tier=str(data.get("speed_tier", "slow")).lower().strip(),
             )
         except Exception as e:
             logger.warning(f"Failed to parse GPT-OSS response: {e}")
             return None
+
+    async def orchestrate_action_async(
+        self,
+        user_transcript: str,
+        state: PronunciationSessionState,
+        diagnosis: Optional[Dict[str, Any]] = None,
+    ) -> DrillAction:
+        """
+        Asynchronously invoke remote GPT-OSS model for coaching action & phrasing.
+        Falls back seamlessly to deterministic orchestrate_action on network or parsing error.
+        """
+        clean_text = user_transcript.strip().lower()
+
+        # Deterministic command shortcuts bypass LLM to maintain zero-latency state transitions
+        if clean_text in (
+            "again", "repeat", "one more time", "play again", "say it again", "say that again",
+            "slower", "slow down", "go slower", "slower please",
+            "normal", "normal speed", "normal pace", "regular speed", "default speed",
+            "stop", "quit", "end", "done", "that's enough", "i'm done",
+        ):
+            return self.orchestrate_action(user_transcript, state, diagnosis)
+
+        # If no API key configured, use deterministic rule engine
+        if not self.api_key:
+            return self.orchestrate_action(user_transcript, state, diagnosis)
+
+        try:
+            import aiohttp
+
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SayThatSound/1.0",
+            }
+
+            diag_info = {
+                "target_word": state.current_target_word or diagnosis.get("word", "three") if diagnosis else "three",
+                "weak_phoneme": diagnosis.get("weak_phoneme") if diagnosis else state.weak_phoneme,
+                "confidence": diagnosis.get("weak_phoneme_confidence", 0.0) if diagnosis else state.diagnosis_confidence,
+                "status": diagnosis.get("diagnosis_status", "idle") if diagnosis else state.diagnosis_status,
+                "speed_tier": state.speed_tier,
+                "user_transcript": user_transcript,
+            }
+
+            prompt = (
+                f"You are a friendly spoken pronunciation practice coach.\n"
+                f"Acoustic phoneme analysis results:\n"
+                f"{json.dumps(diag_info, indent=2)}\n\n"
+                f"CRITICAL RULES:\n"
+                f"1. You MUST NOT invent or alter the weak phoneme diagnosis. Use weak_phoneme={diag_info['weak_phoneme']}.\n"
+                f"2. Keep spoken_response to 1-2 concise, encouraging coaching sentences.\n"
+                f"3. Valid actions: DEMO_PHONEME, DEMO_WORD, REPEAT_DRILL, SLOW_DOWN, NORMAL_SPEED, STOP, ASK_RETRY, NORMAL_CONVERSATION.\n"
+                f"4. If status is 'low_confidence', set action='ASK_RETRY' and ask the user to try the word again.\n"
+                f"5. If status is 'perfect', praise the user with action='NORMAL_CONVERSATION'.\n"
+                f"6. If weak_phoneme is set, set action='DEMO_PHONEME'.\n\n"
+                f"Output ONLY a valid JSON object matching this schema:\n"
+                f'{{"action": "...", "spoken_response": "...", "phoneme": "{diag_info["weak_phoneme"] or ""}", "word": "{diag_info["target_word"]}", "speed_tier": "{diag_info["speed_tier"]}"}}'
+            )
+
+            payload = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.2,
+                "max_tokens": 300,
+            }
+
+            url = f"{self.base_url.rstrip('/')}/chat/completions"
+            timeout = aiohttp.ClientTimeout(total=2.5)
+
+            async with aiohttp.ClientSession(timeout=timeout) as sess:
+                async with sess.post(url, headers=headers, json=payload) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        raw_content = data["choices"][0]["message"]["content"]
+                        action = self.parse_llm_json_response(raw_content)
+                        if action:
+                            validated = self.validate_action(action, state, diagnosis)
+                            logger.info(f"[GPT-OSS] Live LLM response accepted: action={validated.action}")
+                            return validated
+                        else:
+                            logger.warning(f"[GPT-OSS] Unparseable JSON from LLM: {raw_content[:100]}")
+                    else:
+                        err_text = await resp.text()
+                        logger.warning(f"[GPT-OSS] API returned status {resp.status}: {err_text[:100]}")
+
+        except Exception as e:
+            logger.warning(f"[GPT-OSS] LLM invocation failed, using fallback: {e}")
+
+        # Resilient fallback
+        return self.orchestrate_action(user_transcript, state, diagnosis)

@@ -56,10 +56,15 @@ class PronunciationSessionState:
     drill_state: DrillState = DrillState.IDLE
     interaction_generation: int = 0
     drill_id: str = field(default_factory=lambda: "")
+    weak_phoneme_detail: Optional[str] = None
+    weak_phoneme_confidence: float = 0.0
 
     # Retry comparison — tracks previous attempt for progression feedback
     previous_weak_phoneme: Optional[str] = None
     previous_confidence: float = 0.0
+
+    # Session history strip — tracks last 5 attempts with pass/fail
+    session_history: List[Dict[str, Any]] = field(default_factory=list)
 
     def _new_drill_id(self) -> str:
         """Generate a new unique drill ID."""
@@ -78,6 +83,44 @@ class PronunciationSessionState:
         """Transition to a new drill state."""
         self.drill_state = new_state
 
+    def add_history_entry(
+        self,
+        word: str,
+        passed: bool,
+        confidence: float,
+        phoneme: Optional[str] = None,
+        weak_detail: Optional[str] = None,
+    ) -> None:
+        """Record an attempt in the session history strip (retaining last 5)."""
+        entry = {
+            "word": word,
+            "passed": passed,
+            "confidence": round(float(confidence), 2),
+            "phoneme": phoneme,
+            "weak_detail": weak_detail,
+        }
+        self.session_history.append(entry)
+        if len(self.session_history) > 5:
+            self.session_history = self.session_history[-5:]
+
+    def advance_to_next_word(self, vocab_list: List[str]) -> str:
+        """Advance current target word to next word in the target vocabulary list."""
+        if not vocab_list:
+            return self.current_target_word
+
+        try:
+            curr_idx = vocab_list.index(self.current_target_word.lower())
+            next_idx = (curr_idx + 1) % len(vocab_list)
+        except ValueError:
+            next_idx = 0
+
+        self.current_target_word = vocab_list[next_idx]
+        self.weak_phoneme = None
+        self.weak_phoneme_detail = None
+        self.speed_tier = "normal"
+        self._bump_generation()
+        return self.current_target_word
+
     def update_diagnosis(self, diag: PronunciationDiagnosis) -> None:
         """Update state with a new diagnosis when a user attempts a pronunciation."""
         # Store previous attempt for progression comparison
@@ -88,7 +131,10 @@ class PronunciationSessionState:
         self.expected_phonemes = list(diag.expected_phonemes)
         self.observed_phonemes = list(diag.observed_phonemes)
         self.weak_phoneme = diag.weak_phoneme
-        self.diagnosis_confidence = diag.weak_phoneme_confidence
+        self.weak_phoneme_detail = getattr(diag, "weak_phoneme_detail", None)
+        self.weak_phoneme_confidence = diag.weak_phoneme_confidence
+        score = getattr(diag, "pronunciation_score", 0.0)
+        self.diagnosis_confidence = score if score > 0 else diag.weak_phoneme_confidence
         self.diagnosis_status = diag.diagnosis_status
         self.drill_attempt += 1
         self.last_interrupted = False
@@ -210,9 +256,12 @@ class PronunciationSessionState:
             "expected_phonemes": self.expected_phonemes,
             "observed_phonemes": self.observed_phonemes,
             "weak_phoneme": self.weak_phoneme,
+            "weak_phoneme_detail": self.weak_phoneme_detail,
+            "weak_phoneme_confidence": round(self.weak_phoneme_confidence, 2),
             "diagnosis_confidence": round(self.diagnosis_confidence, 2),
             "diagnosis_status": self.diagnosis_status,
             "speed_tier": self.speed_tier,
+            "speed_alpha": SPEED_TIERS.get(self.speed_tier, 1.0),
             "drill_attempt": self.drill_attempt,
             "total_interruptions": self.total_interruptions,
             "last_interrupted": self.last_interrupted,
@@ -221,4 +270,5 @@ class PronunciationSessionState:
             "drill_id": self.drill_id,
             "previous_weak_phoneme": self.previous_weak_phoneme,
             "previous_confidence": round(self.previous_confidence, 2),
+            "session_history": list(self.session_history),
         }

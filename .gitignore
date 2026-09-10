@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 venv/
 logs/*.jsonl
+logs/*.log
 !logs/.gitkeep
 !logs/example_session.jsonl
 test_results/*

@@ -34,6 +34,7 @@ import time
 from typing import Optional
 
 from dotenv import load_dotenv
+from livekit import rtc
 from livekit.agents import (
     Agent,
     AgentSession,
@@ -51,9 +52,16 @@ from config import (
     GPT_OSS_BASE_URL,
     GPT_OSS_MODEL,
     INJECT_TTS_DELAY_MS,
+    PASS_THRESHOLD,
+    RIME_AUDIO_FORMAT,
+    RIME_LANGUAGE,
     RIME_MODEL,
+    RIME_MODEL_ID,
     RIME_SPEAKER,
     RIME_SPEED_ALPHA,
+    SILENCE_TIMEOUT_SECONDS,
+    SLOW_REPLAY_THRESHOLD,
+    SPEED_TIERS,
     SYSTEM_PROMPT,
     TARGET_VOCABULARY,
 )
@@ -161,45 +169,145 @@ async def entrypoint(ctx: JobContext) -> None:
     _current_agent_text = ""
     _turn_speech_start: float | None = None
     _current_speech_handle: Optional[SpeechHandle] = None
+    _is_agent_speaking = False
+    _current_drill_task: Optional[CancellableDrillPlaybackTask] = None
+    _audio_buffer = bytearray()
+
+    async def _consume_user_audio(track: rtc.Track):
+        """Buffer incoming raw PCM audio frames from the user's microphone."""
+        nonlocal _audio_buffer
+        try:
+            stream = rtc.AudioStream(track)
+            async for event in stream:
+                frame = event.frame
+                pcm = frame.data.tobytes() if hasattr(frame.data, "tobytes") else bytes(frame.data)
+                _audio_buffer.extend(pcm)
+                # Keep rolling buffer of last ~3 seconds of 16kHz 16-bit mono audio
+                if len(_audio_buffer) > 128000:
+                    _audio_buffer = _audio_buffer[-96000:]
+        except Exception as e:
+            logger.debug(f"Audio stream subscription ended: {e}")
+
+    @ctx.room.on("track_subscribed")
+    def _on_track_subscribed(track: rtc.Track, publication: rtc.TrackPublication, participant: rtc.RemoteParticipant):
+        if track.kind == rtc.TrackKind.KIND_AUDIO:
+            logger.info(f"Subscribed to user microphone audio track from {participant.identity}")
+            asyncio.create_task(_consume_user_audio(track))
+
+    _silence_timer_task: Optional[asyncio.Task] = None
+
+    def _cancel_silence_watchdog() -> None:
+        nonlocal _silence_timer_task
+        if _silence_timer_task and not _silence_timer_task.done():
+            _silence_timer_task.cancel()
+            _silence_timer_task = None
+
+    def _start_silence_watchdog() -> None:
+        nonlocal _silence_timer_task
+        _cancel_silence_watchdog()
+
+        async def _watchdog_timer():
+            try:
+                await asyncio.sleep(SILENCE_TIMEOUT_SECONDS)
+                if not _is_agent_speaking and ctx.room and ctx.room.connection_state == rtc.ConnectionState.CONN_CONNECTED:
+                    logger.info(f"[WATCHDOG] {SILENCE_TIMEOUT_SECONDS}s silence detected — prompting user")
+                    state.set_drill_state(DrillState.WAITING_FOR_RETRY)
+                    await _broadcast_state()
+                    _speak_fire_and_forget("I didn't catch that, try again.")
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.debug(f"Watchdog exception: {e}")
+
+        _silence_timer_task = asyncio.create_task(_watchdog_timer())
 
     async def _broadcast_state() -> None:
         """Broadcast current drill state to the web client via data channel."""
         try:
+            state_val = state.drill_state.value.lower()
+            if state_val in ("idle",):
+                badge_state = "IDLE"
+            elif state_val in ("listening", "waiting_for_retry"):
+                badge_state = "LISTENING"
+            elif state_val in ("analyzing", "scoring"):
+                badge_state = "SCORING"
+            elif state_val in ("coaching", "demo_phoneme", "demo_word"):
+                badge_state = "COACHING"
+            else:
+                badge_state = state_val.upper()
+
+            speed_alpha = SPEED_TIERS.get(state.speed_tier, 1.0)
             payload = json.dumps({
                 "type": "drill_state",
                 "word": state.current_target_word,
-                "phoneme": state.weak_phoneme,
-                "confidence": state.weak_phoneme_confidence,
+                "phoneme": state.weak_phoneme or "—",
+                "phoneme_detail": state.weak_phoneme_detail or (state.weak_phoneme if state.weak_phoneme else "—"),
+                "confidence": state.diagnosis_confidence,
                 "speed_tier": state.speed_tier,
-                "drill_state": state.drill_state.value,
+                "speed_alpha": speed_alpha,
+                "drill_state": badge_state,
                 "coach_text": _current_agent_text,
+                "history": state.session_history,
             })
             if ctx.room and ctx.room.local_participant:
-                await ctx.room.local_participant.publish_data(payload, reliable=True)
+                await ctx.room.local_participant.publish_data(payload.encode("utf-8"), reliable=True)
         except Exception as e:
             logger.debug(f"Failed to publish drill state: {e}")
 
-    def _speak(text: str) -> None:
-        """Synthesize and play speech via LiveKit session with barge-in support."""
-        nonlocal _current_speech_handle, _current_agent_text, _turn_speech_start
+    async def _speak_stage(text: str) -> None:
+        """
+        Synthesize and play one discrete stage of speech via LiveKit session with barge-in support.
+        Awaits playback completion. Releasing cleanly when finished.
+        """
+        nonlocal _current_speech_handle, _current_agent_text, _turn_speech_start, _is_agent_speaking
 
-        if _current_speech_handle and not _current_speech_handle.done():
-            _current_speech_handle.interrupt()
+        if not text or not text.strip():
+            return
 
         _current_agent_text = text
+        start_mono = time.monotonic()
+        current_alpha = getattr(tts._opts, "speed_alpha", 1.0)
+
+        # Log exact Rime TTS invocation with parameters
+        logger.info(
+            f"[RIME TTS INVOCATION] text='{text}' | model='{RIME_MODEL_ID}' | speaker='{RIME_SPEAKER}' | "
+            f"language='{RIME_LANGUAGE}' | format='{RIME_AUDIO_FORMAT}' | speed_alpha={current_alpha}"
+        )
+
         handle = session.say(text, allow_interruptions=True)
         _current_speech_handle = handle
 
+        loop = asyncio.get_event_loop()
+        done_fut = loop.create_future()
+
         def _on_speech_done(h: SpeechHandle) -> None:
-            nonlocal _current_agent_text, _current_user_text
-            if h.interrupted:
+            if not done_fut.done():
+                done_fut.set_result(h)
+
+        handle.add_done_callback(_on_speech_done)
+
+        try:
+            h = await done_fut
+            latency_ms = (time.monotonic() - start_mono) * 1000
+            logger.info(f"[RIME TTS COMPLETED] text='{text}' | latency={latency_ms:.1f}ms")
+            sess_logger.log_event("rime_tts_call", {
+                "text": text,
+                "model": RIME_MODEL_ID,
+                "speaker": RIME_SPEAKER,
+                "language": RIME_LANGUAGE,
+                "audio_format": RIME_AUDIO_FORMAT,
+                "speed_alpha": current_alpha,
+                "latency_ms": round(latency_ms, 1),
+            })
+
+            if h.interrupted and _is_agent_speaking:
                 state.on_interrupt()
                 interrupt_elapsed_ms = None
                 if _turn_speech_start is not None:
                     interrupt_elapsed_ms = (time.monotonic() - _turn_speech_start) * 1000
 
                 logger.info(
-                    f"[INTERRUPT] Speech interrupted! "
+                    f"[INTERRUPT] Speech interrupted mid-playback! "
                     f"Preserved state: word='{state.current_target_word}', "
                     f"phoneme='{state.weak_phoneme}', speed='{state.speed_tier}'"
                 )
@@ -225,9 +333,8 @@ async def entrypoint(ctx: JobContext) -> None:
                     interaction_generation=state.interaction_generation,
                     drill_state=state.drill_state.value,
                 )
-                _current_user_text = ""
-                _current_agent_text = ""
                 asyncio.create_task(_broadcast_state())
+                raise asyncio.CancelledError()
             else:
                 sess_logger.log_turn(
                     user_transcript=_current_user_text,
@@ -237,23 +344,23 @@ async def entrypoint(ctx: JobContext) -> None:
                     interaction_generation=state.interaction_generation,
                     drill_state=state.drill_state.value,
                 )
-                _current_user_text = ""
-                _current_agent_text = ""
-                if state.drill_state in (
-                    DrillState.DEMO_PHONEME,
-                    DrillState.DEMO_WORD,
-                    DrillState.COACHING,
-                ):
-                    state.set_drill_state(DrillState.WAITING_FOR_RETRY)
-                    asyncio.create_task(_broadcast_state())
+        except asyncio.CancelledError:
+            if handle and not handle.done():
+                handle.interrupt()
+            raise
 
-        handle.add_done_callback(_on_speech_done)
+    def _speak_fire_and_forget(text: str) -> None:
+        """Non-blocking fire-and-forget speech for welcome greetings or simple responses."""
+        asyncio.create_task(_speak_stage(text))
 
     # ---- Event Hooks ----
 
     @session.on("user_input_transcribed")
     def _on_user_transcribed(ev) -> None:
         nonlocal _current_user_text
+        _cancel_silence_watchdog()
+        state.set_drill_state(DrillState.LISTENING)
+        asyncio.create_task(_broadcast_state())
         if not getattr(ev, "is_final", True):
             return
         transcript = ev.transcript
@@ -264,11 +371,22 @@ async def entrypoint(ctx: JobContext) -> None:
         logger.info(f"[USER] {_current_user_text}")
 
     async def _process_turn(user_text: str) -> None:
-        nonlocal _current_agent_text, _current_speech_handle
+        nonlocal _current_agent_text, _current_speech_handle, _current_drill_task, _audio_buffer
 
-        if _current_speech_handle and not _current_speech_handle.done():
+        _cancel_silence_watchdog()
+
+        # Only interrupt speech if the agent is actively speaking
+        if _is_agent_speaking and _current_speech_handle and not _current_speech_handle.done():
             _current_speech_handle.interrupt()
             _current_speech_handle = None
+
+        # Cancel any pending drill task
+        if _current_drill_task and not _current_drill_task.is_cancelled:
+            _current_drill_task.cancel()
+
+        # Capture user audio frames accumulated during speech
+        user_audio = bytes(_audio_buffer)
+        _audio_buffer.clear()
 
         norm_text = user_text.lower().strip()
 
@@ -285,6 +403,9 @@ async def entrypoint(ctx: JobContext) -> None:
                 interaction_generation=state.interaction_generation,
             )
             await _play_drill_action(action)
+            state.set_drill_state(DrillState.LISTENING)
+            await _broadcast_state()
+            _start_silence_watchdog()
             return
 
         if cmd_type == CommandType.SLOWER:
@@ -300,6 +421,9 @@ async def entrypoint(ctx: JobContext) -> None:
                 interaction_generation=state.interaction_generation,
             )
             await _play_drill_action(action)
+            state.set_drill_state(DrillState.LISTENING)
+            await _broadcast_state()
+            _start_silence_watchdog()
             return
 
         if cmd_type == CommandType.NORMAL_SPEED:
@@ -315,6 +439,9 @@ async def entrypoint(ctx: JobContext) -> None:
                 interaction_generation=state.interaction_generation,
             )
             await _play_drill_action(action)
+            state.set_drill_state(DrillState.LISTENING)
+            await _broadcast_state()
+            _start_silence_watchdog()
             return
 
         if cmd_type == CommandType.STOP:
@@ -330,7 +457,7 @@ async def entrypoint(ctx: JobContext) -> None:
             sess_logger.mark_llm_first_token()
             state.handle_stop()
             await _broadcast_state()
-            _speak(action.spoken_response)
+            _speak_fire_and_forget(action.spoken_response)
             return
 
         # Friendly greeting / conversational check if not attempting a target word
@@ -350,12 +477,13 @@ async def entrypoint(ctx: JobContext) -> None:
             )
             logger.info(f"[AGENT] {greeting_msg}")
             sess_logger.mark_llm_first_token()
-            _speak(greeting_msg)
+            state.set_drill_state(DrillState.COACHING)
             await _broadcast_state()
+            await _speak_stage(greeting_msg)
+            state.set_drill_state(DrillState.LISTENING)
+            await _broadcast_state()
+            _start_silence_watchdog()
             return
-
-        # Not a command — treat as pronunciation attempt
-        state.set_drill_state(DrillState.LISTENING)
 
         # Identify target word (Mode A or Mode B)
         target = extract_target_word(user_text, TARGET_VOCABULARY)
@@ -368,16 +496,26 @@ async def entrypoint(ctx: JobContext) -> None:
                 logger.info(f"[AGENT] Dictionary miss: {target}")
                 sess_logger.log_event("dictionary_miss", {"word": target})
                 sess_logger.mark_llm_first_token()
-                _speak(miss_text)
+                state.set_drill_state(DrillState.COACHING)
                 await _broadcast_state()
+                await _speak_stage(miss_text)
+                state.set_drill_state(DrillState.LISTENING)
+                await _broadcast_state()
+                _start_silence_watchdog()
                 return
             state.current_target_word = target
 
         word_to_analyze = state.current_target_word or TARGET_VOCABULARY[0]
 
-        # Analyze pronunciation
+        # Analyze pronunciation using actual microphone audio and STT transcript
         state.set_drill_state(DrillState.ANALYZING)
-        diag = analyzer.analyze_phonemes(word=word_to_analyze)
+        await _broadcast_state()
+
+        diag = analyzer.analyze_phonemes(
+            word=word_to_analyze,
+            audio_frames=user_audio,
+            spoken_transcript=user_text,
+        )
         state.update_diagnosis(diag)
 
         # Log structured diagnosis
@@ -394,19 +532,94 @@ async def entrypoint(ctx: JobContext) -> None:
             interaction_generation=state.interaction_generation,
         )
 
-        # GPT-OSS Orchestration with validation
-        action = orchestrator.orchestrate_action(
-            user_transcript=user_text,
-            state=state,
-            diagnosis=diag.to_dict(),
+        score = state.diagnosis_confidence
+        logger.info(
+            f"[PRONUNCIATION EVAL] word='{word_to_analyze}' score={score:.2f} "
+            f"weak_phoneme={diag.weak_phoneme} detail='{diag.weak_phoneme_detail}' "
+            f"status={diag.diagnosis_status}"
         )
-        action = orchestrator.validate_action(action, state)
 
-        # Execute drill playback
-        await _play_drill_action(action)
+        # 1. Confidence < 60%: Rime speaks corrective model at 0.5x speed emphasizing weak sound (COACHING state)
+        if score < SLOW_REPLAY_THRESHOLD:
+            state.set_drill_state(DrillState.COACHING)
+            state.speed_tier = "slow_replay"
+            state.add_history_entry(
+                word=word_to_analyze,
+                passed=False,
+                confidence=score,
+                phoneme=diag.weak_phoneme,
+                weak_detail=diag.weak_phoneme_detail,
+            )
+            await _broadcast_state()
+
+            action = await orchestrator.orchestrate_action_async(
+                user_transcript=user_text,
+                state=state,
+                diagnosis=diag.to_dict(),
+            )
+            action = orchestrator.validate_action(action, state, diag.to_dict())
+            action.speed_tier = "slow_replay"
+            if diag.weak_phoneme:
+                action.action = "DEMO_PHONEME"
+                action.phoneme = diag.weak_phoneme
+                if not action.spoken_response or len(action.spoken_response) < 5:
+                    action.spoken_response = f"Let's work on the {diag.weak_phoneme} sound in '{word_to_analyze}'. Listen to this."
+            else:
+                action.action = "DEMO_WORD"
+                if not action.spoken_response or len(action.spoken_response) < 5:
+                    action.spoken_response = f"Let's try '{word_to_analyze}' again slowly."
+
+            await _play_drill_action(action)
+
+        # 2. Confidence >= 75%: Rime gives positive feedback at 1.0x, marks ✓ in history, advances to next word
+        elif score >= PASS_THRESHOLD:
+            state.set_drill_state(DrillState.COACHING)
+            state.speed_tier = "normal"
+            state.add_history_entry(
+                word=word_to_analyze,
+                passed=True,
+                confidence=score,
+                phoneme=None,
+                weak_detail="Clear",
+            )
+            next_word = state.advance_to_next_word(TARGET_VOCABULARY)
+            await _broadcast_state()
+
+            praise_msg = f"Great job! Your pronunciation of '{word_to_analyze}' was clear. Next word is {next_word}."
+            tts._opts.speed_alpha = SPEED_TIERS.get("normal", 1.0)
+            logger.info(f"[AGENT] {praise_msg}")
+            sess_logger.mark_llm_first_token()
+            await _speak_stage(praise_msg)
+
+        # 3. 60% <= score < 75%: close attempt, prompt retry
+        else:
+            state.set_drill_state(DrillState.COACHING)
+            state.speed_tier = "normal"
+            state.add_history_entry(
+                word=word_to_analyze,
+                passed=False,
+                confidence=score,
+                phoneme=diag.weak_phoneme,
+                weak_detail="Close",
+            )
+            await _broadcast_state()
+
+            retry_msg = f"Good attempt on '{word_to_analyze}', you're close! Try saying it once more."
+            tts._opts.speed_alpha = SPEED_TIERS.get("normal", 1.0)
+            logger.info(f"[AGENT] {retry_msg}")
+            sess_logger.mark_llm_first_token()
+            await _speak_stage(retry_msg)
+
+        # Finished coaching turn -> back to listening, start 5s silence watchdog
+        state.set_drill_state(DrillState.LISTENING)
+        await _broadcast_state()
+        _start_silence_watchdog()
 
     async def _play_drill_action(action) -> None:
-        nonlocal _current_agent_text
+        nonlocal _current_agent_text, _current_drill_task
+
+        if _current_drill_task and not _current_drill_task.is_cancelled:
+            _current_drill_task.cancel()
 
         playback = format_drill_playback(
             phoneme=action.phoneme,
@@ -414,19 +627,8 @@ async def entrypoint(ctx: JobContext) -> None:
             speed_tier=action.speed_tier,
         )
 
-        # Format spoken script
-        if action.action == "DEMO_PHONEME":
-            spoken_text = f"{action.spoken_response} {playback['spoken_script']}"
-            state.set_drill_state(DrillState.DEMO_PHONEME)
-        elif action.action in ("SLOW_DOWN", "NORMAL_SPEED", "DEMO_WORD"):
-            spoken_text = f"{action.spoken_response} {action.word}"
-            state.set_drill_state(DrillState.DEMO_WORD)
-        elif action.action == "ASK_RETRY":
-            spoken_text = action.spoken_response
-            state.set_drill_state(DrillState.WAITING_FOR_RETRY)
-        else:
-            spoken_text = action.spoken_response
-            state.set_drill_state(DrillState.IDLE)
+        def _update_tts_speed(speed_alpha: float):
+            tts._opts.speed_alpha = speed_alpha
 
         # Log pronunciation demonstration
         sess_logger.log_pronunciation_demo(
@@ -440,23 +642,59 @@ async def entrypoint(ctx: JobContext) -> None:
             drill_state=state.drill_state.value,
         )
 
-        # Update Rime TTS speed rate dynamically
-        tts._opts.speed_alpha = playback["speed_alpha"]
-
-        # Synthesize via LiveKit session
-        logger.info(f"[AGENT] Speaking: {spoken_text} (speed={playback['speed_alpha']})")
+        logger.info(f"[AGENT] Action: {action.action}, word: {action.word}, phoneme: {action.phoneme}")
         sess_logger.mark_llm_first_token()
 
-        await _broadcast_state()
-        _speak(spoken_text)
+        if action.action == "DEMO_PHONEME":
+            drill_task = CancellableDrillPlaybackTask(
+                generation_id=state.interaction_generation,
+                state=state,
+                speak_fn=_speak_stage,
+            )
+            _current_drill_task = drill_task
+            await _broadcast_state()
+            await drill_task.execute(
+                coaching_text=action.spoken_response,
+                phoneme_repr=playback["isolated_repr"],
+                word=action.word,
+                speed_alpha=playback["speed_alpha"],
+                tts_update_fn=_update_tts_speed,
+            )
+        elif action.action in ("SLOW_DOWN", "NORMAL_SPEED", "DEMO_WORD"):
+            drill_task = CancellableDrillPlaybackTask(
+                generation_id=state.interaction_generation,
+                state=state,
+                speak_fn=_speak_stage,
+            )
+            _current_drill_task = drill_task
+            await _broadcast_state()
+            await drill_task.execute(
+                coaching_text=action.spoken_response,
+                phoneme_repr="",
+                word=action.word,
+                speed_alpha=playback["speed_alpha"],
+                tts_update_fn=_update_tts_speed,
+            )
+        elif action.action == "ASK_RETRY":
+            state.set_drill_state(DrillState.WAITING_FOR_RETRY)
+            await _broadcast_state()
+            await _speak_stage(action.spoken_response)
+        else:
+            state.set_drill_state(DrillState.IDLE)
+            await _broadcast_state()
+            await _speak_stage(action.spoken_response)
 
     @session.on("agent_state_changed")
     def _on_agent_state_changed(ev) -> None:
-        nonlocal _turn_speech_start
+        nonlocal _turn_speech_start, _is_agent_speaking
         if ev.new_state == "speaking":
+            _is_agent_speaking = True
+            _cancel_silence_watchdog()
             _turn_speech_start = time.monotonic()
             sess_logger.mark_tts_first_byte()
             logger.info("[AGENT] Started speaking (TTS playback)")
+        else:
+            _is_agent_speaking = False
 
     # ---- Inject artificial delay for barge-in test ----
     if INJECT_TTS_DELAY_MS > 0:
@@ -479,8 +717,12 @@ async def entrypoint(ctx: JobContext) -> None:
     # Speak welcome greeting and broadcast initial state to web client
     welcome_msg = "Welcome to Say That Sound! Say a word like three, ship, sheep, rice, light, or right to begin."
     logger.info(f"[AGENT] {welcome_msg}")
-    _speak(welcome_msg)
+    state.set_drill_state(DrillState.COACHING)
     await _broadcast_state()
+    await _speak_stage(welcome_msg)
+    state.set_drill_state(DrillState.LISTENING)
+    await _broadcast_state()
+    _start_silence_watchdog()
 
     await asyncio.Event().wait()
 
