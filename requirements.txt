@@ -1,3 +1,4 @@
 livekit-agents[rime,deepgram,anthropic,silero]
 aiohttp>=3.9
 python-dotenv>=1.0
+cmudict>=1.1.3
