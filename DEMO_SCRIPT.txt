@@ -1,0 +1,169 @@
+================================================================================
+DEMO VIDEO SCRIPT: SAY THAT SOUND (VOICE PRONUNCIATION COACH)
+Target Runtime: ~3:30 - 4:00 minutes
+================================================================================
+
+SETUP BEFORE RECORDING:
+  - Tab 1: Browser open at http://localhost:8080/
+  - Tab 2: Terminal open at project directory, ready to run:
+           python test_pronunciation_bargein.py
+  - Mic: Tested and unmuted
+
+================================================================================
+STEP 1: THE USER & THE PROBLEM [0:00 - 0:30]
+================================================================================
+[ON SCREEN]: Browser showing Say That Sound app (http://localhost:8080/)
+             Highlight 'Powered by Rime TTS' badge at top.
+
+[YOU SAY]:
+"Hi, this is Say That Sound — a voice pronunciation coach for language learners
+and ESL speakers.
+
+Text apps can tell you when a word is wrong, but text cannot show your mouth how
+to make the sound. You need a voice that can slow down and physically demonstrate
+the correct sound. That’s why we built this app entirely around Rime TTS."
+
+
+================================================================================
+STEP 2: NORMAL FLOW / HAPPY PATH [0:30 - 1:30]
+================================================================================
+[ACTION]: Click green button 'Start Practicing'.
+
+[RIME AUDIO PLAYS]:
+"Hi there! Say a word like three, ship, sheep, rice, light, or right to start
+your practice."
+
+[YOU SAY]:
+"Let's connect. Rime greets us right away over WebRTC.
+
+Let's practice the word 'three'. First, I’ll intentionally mispronounce it as
+'tree' to show the correction."
+
+[ACTION]: Speak into microphone: "Tree."
+
+[POINT OUT ON SCREEN]:
+  - Pronunciation Score: Drops to 47% (Red warning / Needs Drill)
+  - Weak Phoneme: Shows 'TH -> T substitution'
+  - Rime Corrective Speed: Drops to 0.50x (Slow-replay model)
+  - Phoneme Heatmap: Highlights TH in amber
+  - Mouth Guide: Shows tongue placement between front teeth
+
+[RIME AUDIO PLAYS AT 0.5x]:
+"Let's work on the TH sound in 'three'. Listen to this: {TH}... three."
+
+[YOU SAY]:
+"Notice that: Rime detected that I said 'T' instead of 'TH'. It automatically
+dropped to half-speed (0.5x), isolated the {TH} sound, and modeled the word
+slowly so I can imitate it.
+
+Now I'll say it correctly."
+
+[ACTION]: Speak into microphone clearly: "Three."
+
+[POINT OUT ON SCREEN]:
+  - Pronunciation Score: Jumps to 88% (Green / PASSED)
+  - History Strip: Adds a green checkmark (three ✓ 88%)
+  - Speed Tier: Resets to 1.00x
+
+[RIME AUDIO PLAYS AT 1.0x]:
+"Great job! Your pronunciation of 'three' was clear. Next word is ship."
+
+
+================================================================================
+STEP 3: NAME THE HARD VOICE PROBLEM [1:30 - 2:00]
+================================================================================
+[ON SCREEN]: Focus on the Live Acoustic Visualizer and Metrics Card.
+
+[YOU SAY (speak with clear emphasis)]:
+"Now let's look at the hard voice problem we solved, stated directly from our
+evidence document:
+
+'Real-time user barge-in during active Rime TTS playback — detecting interruption,
+cutting audio cleanly with zero stale playback, and preserving session state.'
+
+Normally, interrupting an AI voice causes audio echoes, buffer leaks, and
+completely resets the learner's session."
+
+
+================================================================================
+STEP 4: THE STRESS TEST — LIVE INTERRUPTION [2:00 - 2:50]
+================================================================================
+[ON SCREEN]: Keep the app screen visible so judges can watch the waveform and cards.
+
+[YOU SAY]:
+"Let's test this live. I'm going to trigger Rime to coach 'three'. While it is
+speaking mid-sentence, I will interrupt and say: 'Slower'."
+
+[ACTION]: Say 'three' into mic to get Rime speaking.
+
+[RIME AUDIO STARTS]:
+"Let's work on the TH sound in 'three'. Listen to..."
+
+[ACTION (Cut in firmly mid-sentence)]:
+Speak loudly into mic: "Slower!"
+
+[POINT OUT ON SCREEN]:
+  - Waveform: Cuts flat instantly (zero audio overlap or leakage)
+  - Target Word: Stays 'three' (never resets!)
+  - Weak Phoneme: Stays 'TH' (preserved!)
+  - Speed Tier: Shifts down to the slower speed tier
+
+[RIME AUDIO RESPONDS AT SLOWER PACE]:
+"Slowing down. Let's try three again very slowly."
+
+[YOU SAY]:
+"Look at that: audio cut out immediately with zero stale leakage, our target
+word stayed 'three', and Rime dynamically shifted to a slower playback tier."
+
+
+================================================================================
+STEP 5: THE MEASUREMENT & RESULT [2:50 - 3:15]
+================================================================================
+[ON SCREEN]: Point to Metrics Card and History Log.
+
+[YOU SAY]:
+"Our acceptance benchmark guarantees three things:
+  1. Cutoff latency well under our 300-millisecond threshold.
+  2. Zero stale audio frames leaked.
+  3. Session state completely identical before and after interruption.
+
+The student stays focused on their drill without broken audio or lost progress."
+
+
+================================================================================
+STEP 6: SHOW EVIDENCE FILE & AUTOMATED TEST OUTPUT [3:15 - 3:40]
+================================================================================
+[ACTION]: Switch to Terminal window and press Enter:
+          python test_pronunciation_bargein.py
+
+[POINT OUT ON SCREEN TERMINAL OUTPUT]:
+  - [1/4] Starting pronunciation drill...
+  - [2/4] Injecting interruption ('slower')...
+  - [4/4] Verification Summary:
+          Stale Audio Detected: False
+          Word Preserved: True ('three')
+          Phoneme Preserved: True ('TH')
+          Speed Tier Advanced: slow -> slower
+  - >>> PASS <<<
+
+[YOU SAY]:
+"Here is our automated evidence test: test_pronunciation_bargein.py.
+
+It verifies the entire barge-in sequence, ensures zero audio leakage, confirms
+state preservation, and finishes with a clean PASS verdict and an evidence
+JSON report."
+
+
+================================================================================
+STEP 7: CONFIRM SPEECH PROVIDER & WRAP-UP [3:40 - 4:00]
+================================================================================
+[ACTION]: Switch back to Browser, point to the glowing 'Powered by Rime TTS' badge.
+
+[YOU SAY]:
+"Every single voice in this app — the greeting, the isolated phoneme
+demonstrations, the slowed corrective feedback, and the praise — is generated
+natively by Rime Mist v3 using the Astra voice.
+
+Rime is the coach that makes real-time pronunciation correction possible.
+Thank you!"
+================================================================================

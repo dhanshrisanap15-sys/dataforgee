@@ -91,7 +91,7 @@ async def run_pronunciation_bargein_test():
     await asyncio.sleep(0.3)  # wait 300ms so playback is actively underway
 
     assert channel.is_playing, "Audio channel should be actively playing drill demonstration"
-    print("      → Audio channel actively transmitting Rime audio frames...")
+    print("      -> Audio channel actively transmitting Rime audio frames...")
 
     # 2. Inject interruption mid-playback
     print("[2/4] Injecting user speech interruption ('slower')...")
@@ -103,7 +103,7 @@ async def run_pronunciation_bargein_test():
     playback_cutoff_at = time.monotonic()
 
     cutoff_latency_ms = round((playback_cutoff_at - interrupt_injected_at) * 1000, 2)
-    print(f"      → Audio halted. Cutoff latency: {cutoff_latency_ms} ms (target < 300ms)")
+    print(f"      -> Audio halted. Cutoff latency: {cutoff_latency_ms} ms (target < 300ms)")
 
     # Ensure background task completes without leakage
     await playback_task
